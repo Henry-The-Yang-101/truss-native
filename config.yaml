@@ -1,0 +1,7 @@
+model_metadata:
+  name: "Llama-3-8B-Instruct"
+  framework: "llama.cpp"
+  quantization: "Q4_K_M"
+system_config:
+  model_dir: "../models/llama3-8b-gguf"
+  port: 8080
