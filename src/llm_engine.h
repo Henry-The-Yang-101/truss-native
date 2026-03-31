@@ -3,7 +3,7 @@
 #include <memory>
 
 struct GenerationConfig {
-    int max_tokens = 100;
+    int max_tokens = 1024;
     float temperature = 0.7f;
 };
 
