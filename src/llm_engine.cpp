@@ -84,7 +84,6 @@ struct LLMEngine::Impl {
             llama_sampler_accept(smpl, new_token_id);
 
             if (llama_token_is_eog(vocab, new_token_id)) {
-                n_cur++; // count the end-of-generation token in our history
                 break;
             }
 
