@@ -59,6 +59,37 @@ int main() {
         res.set_content(res_body.dump(), "application/json");
     });
 
+    svr.Get("/v1/models", [&](const httplib::Request &req, httplib::Response &res) {
+        json models_list = {
+            {"object", "list"},
+            {"data", {
+                {
+                    {"id", "llama-3"},
+                    {"family", "Llama 3"},
+                    {"parameters", "8B"},
+                    {"quantization", "Q4_K_M"},
+                    {"description", "Fast, general-purpose instruction model."}
+                },
+                {
+                    {"id", "qwen-2.5"},
+                    {"family", "Qwen 2.5"},
+                    {"parameters", "32B"},
+                    {"quantization", "Q3_K_L"},
+                    {"description", "Massive, highly capable reasoning and chat model."}
+                },
+                {
+                    {"id", "qwen-3-coder"},
+                    {"family", "Qwen 3"},
+                    {"parameters", "30B (MoE)"},
+                    {"quantization", "Q4_K_M"},
+                    {"description", "Mixture-of-Experts model optimized specifically for programming."}
+                }
+            }}
+        };
+
+        res.set_content(models_list.dump(4), "application/json");
+    });
+
     std::cout << "Dynamic API Server running on port 8080" << std::endl;
     std::cout << "Waiting for an initialization request..." << std::endl;
     svr.listen("0.0.0.0", 8080);
