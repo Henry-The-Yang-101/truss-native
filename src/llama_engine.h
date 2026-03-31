@@ -2,7 +2,6 @@
 #include <string>
 #include <memory>
 
-// FIX: Moved the struct outside the class so the compiler parses it first
 struct GenerationConfig {
     int max_tokens = 100;
     float temperature = 0.7f;

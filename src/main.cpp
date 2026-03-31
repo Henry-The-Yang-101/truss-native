@@ -7,17 +7,13 @@
 using json = nlohmann::json;
 
 int main() {
-    // 1. Emulate Truss by reading the config
     TrussConfig config = load_config("../config.yaml");
-    
-    // For GGUF, we need to point directly to the file, not just the directory
+
     std::string model_file = config.model_dir + "/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf";
 
-    // 2. Load the model into Apple Silicon unified memory via llama.cpp
     std::cout << "Loading model from " << model_file << "..." << std::endl;
     LlamaEngine engine(model_file);
 
-    // 3. Start the server
     httplib::Server svr;
 
     svr.Post("/v1/predict", [&](const httplib::Request &req, httplib::Response &res) {
