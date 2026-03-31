@@ -1,10 +1,10 @@
-#include "llama_engine.h"
+#include "llm_engine.h"
 #include "llama.h"
 #include <vector>
 #include <stdexcept>
 #include <iostream>
 
-struct LlamaEngine::Impl {
+struct LLMEngine::Impl {
     llama_model* model = nullptr;
     llama_context* ctx = nullptr;
     llama_sampler* smpl = nullptr;
@@ -12,15 +12,13 @@ struct LlamaEngine::Impl {
     Impl(const std::string& model_path) {
         llama_backend_init();
 
-        // load model, offload to apple silicon gpu
         llama_model_params model_params = llama_model_default_params();
         model_params.n_gpu_layers = 99; 
 
-        std::cout << "[LlamaEngine] Loading model into Metal unified memory..." << std::endl;
+        std::cout << "[LLMEngine] Loading model into Metal unified memory..." << std::endl;
         model = llama_load_model_from_file(model_path.c_str(), model_params);
         if (!model) throw std::runtime_error("Failed to load model from " + model_path);
 
-        // create context
         llama_context_params ctx_params = llama_context_default_params();
         ctx_params.n_ctx = 2048; 
         
@@ -63,7 +61,7 @@ struct LlamaEngine::Impl {
             batch.pos[batch.n_tokens] = i;
             batch.n_seq_id[batch.n_tokens] = 1;
             batch.seq_id[batch.n_tokens][0] = 0;
-            batch.logits[batch.n_tokens] = (i == tokens.size() - 1);
+            batch.logits[batch.n_tokens] = (i == tokens.size() - 1); 
             batch.n_tokens++;
         }
 
@@ -71,7 +69,7 @@ struct LlamaEngine::Impl {
 
         std::string result = "";
         int n_decode = 0; 
-        int n_cur = tokens.size();
+        int n_cur = tokens.size(); 
 
         while (n_decode < config.max_tokens) {
             llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
@@ -83,10 +81,9 @@ struct LlamaEngine::Impl {
             int n_chars = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
             if (n_chars > 0) result += std::string(buf, n_chars);
 
-            // Prepare the batch for the SINGLE new token at the CORRECT position (n_cur)
             batch.n_tokens = 0;
             batch.token[batch.n_tokens] = new_token_id;
-            batch.pos[batch.n_tokens] = n_cur; // <--- This fixes the infinite loop!
+            batch.pos[batch.n_tokens] = n_cur; 
             batch.n_seq_id[batch.n_tokens] = 1;
             batch.seq_id[batch.n_tokens][0] = 0;
             batch.logits[batch.n_tokens] = true;
@@ -98,23 +95,23 @@ struct LlamaEngine::Impl {
             n_decode++;
         }
 
-        llama_batch_free(batch); // Free memory to prevent leaks
+        llama_batch_free(batch); 
         return result;
     }
 };
 
-// --- LlamaEngine Public Methods ---
+// --- LLMEngine Public Methods ---
 
-LlamaEngine::LlamaEngine(const std::string& model_path) 
+LLMEngine::LLMEngine(const std::string& model_path) 
     : pimpl_(std::make_unique<Impl>(model_path)) {}
 
-LlamaEngine::~LlamaEngine() = default;
+LLMEngine::~LLMEngine() = default;
 
-std::string LlamaEngine::generate(const std::string& prompt, const GenerationConfig& config) {
+std::string LLMEngine::generate(const std::string& prompt, const GenerationConfig& config) {
     try {
         return pimpl_->generate_text(prompt, config);
     } catch (const std::exception& e) {
-        std::cerr << "[LlamaEngine Error] " << e.what() << std::endl;
+        std::cerr << "[LLMEngine Error] " << e.what() << std::endl;
         return "Error during generation: " + std::string(e.what());
     }
 }
