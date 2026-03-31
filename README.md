@@ -34,3 +34,11 @@ python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id
 cd build
 ./truss_server
 ```
+In a different terminal, make this POST request to test your prompt:
+```
+curl -X POST http://localhost:8080/v1/predict \
+
+     -H "Content-Type: application/json" \
+
+     -d '{"prompt": "what is the meaning of life?"}'
+```
