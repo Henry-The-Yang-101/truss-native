@@ -10,8 +10,10 @@ struct LLMEngine::Impl {
     llama_sampler* smpl = nullptr;
 
     Impl(const std::string& model_path) {
+        // Initialize backend
         llama_backend_init();
 
+        // Load Model, offloading all layers to your M4 Pro's Metal GPU
         llama_model_params model_params = llama_model_default_params();
         model_params.n_gpu_layers = 99; 
 
@@ -19,6 +21,7 @@ struct LLMEngine::Impl {
         model = llama_load_model_from_file(model_path.c_str(), model_params);
         if (!model) throw std::runtime_error("Failed to load model from " + model_path);
 
+        // Create Context
         llama_context_params ctx_params = llama_context_default_params();
         ctx_params.n_ctx = 2048; 
         

@@ -18,7 +18,7 @@ FetchContent_Declare(
 set(GGML_METAL ON CACHE BOOL "Enable Metal" FORCE) 
 FetchContent_MakeAvailable(llama)
 
-add_executable(truss_server src/main.cpp src/llama_engine.cpp)
+add_executable(truss_server src/main.cpp src/llm_engine.cpp)
 
 target_link_libraries(truss_server PRIVATE 
     yaml-cpp

@@ -1,5 +1,5 @@
 #include "httplib.h"
-#include "llama_engine.h"
+#include "llm_engine.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <memory>
@@ -7,7 +7,7 @@
 
 using json = nlohmann::json;
 
-std::unique_ptr<LlamaEngine> engine = nullptr;
+std::unique_ptr<LLMEngine> engine = nullptr;
 
 std::mutex engine_mutex;
 
@@ -30,13 +30,13 @@ int main() {
         try {
             auto req_body = json::parse(req.body);
             std::string model_path = req_body["model_path"];
-            current_model_family = req_body.value("family", "llama3"); // defaults to llama3
+            current_model_family = req_body.value("family", "llama3");
 
             std::cout << "\n[API] Unloading previous model from memory (if any)..." << std::endl;
-            engine.reset(); // This automatically calls the LlamaEngine Destructor and frees the GPU memory
+            engine.reset();
 
             std::cout << "[API] Loading new model: " << model_path << "..." << std::endl;
-            engine = std::make_unique<LlamaEngine>(model_path);
+            engine = std::make_unique<LLMEngine>(model_path);
 
             res.set_content(json({{"status", "success"}, {"message", "Model loaded into RAM"}}).dump(), "application/json");
         } catch (const std::exception& e) {
