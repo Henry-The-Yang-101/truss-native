@@ -38,19 +38,14 @@ struct LlamaEngine::Impl {
     std::string generate_text(const std::string& prompt, const GenerationConfig& config) {
         llama_memory_clear(llama_get_memory(ctx), true);
 
-        std::string formatted_prompt = 
-            "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n" + 
-            prompt + 
-            "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
-
         const llama_vocab* vocab = llama_model_get_vocab(model);
 
-        std::vector<llama_token> tokens(formatted_prompt.length() + 2);
+        std::vector<llama_token> tokens(prompt.length() + 2);
         
-        int n_tokens = llama_tokenize(vocab, formatted_prompt.c_str(), formatted_prompt.length(), tokens.data(), tokens.size(), false, true);
+        int n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), false, true);
         if (n_tokens < 0) {
             tokens.resize(-n_tokens);
-            n_tokens = llama_tokenize(vocab, formatted_prompt.c_str(), formatted_prompt.length(), tokens.data(), tokens.size(), false, true);
+            n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), false, true);
         }
         tokens.resize(n_tokens);
 
