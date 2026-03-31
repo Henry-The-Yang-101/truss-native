@@ -10,7 +10,7 @@ struct LLMEngine::Impl {
     llama_sampler* smpl = nullptr;
 
     int n_past = 0; 
-    const int MAX_CONTEXT = 2048; 
+    const int MAX_CONTEXT = 4096; 
 
     Impl(const std::string& model_path) {
         llama_backend_init();
