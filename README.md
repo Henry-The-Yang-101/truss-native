@@ -2,8 +2,8 @@
 
 ### Clone
 ```bash
-git clone <your-repo-url>
-cd truss-on-mac
+git clone https://github.com/Henry-The-Yang-101/truss-native.git
+cd truss-native
 ```
 
 ### Install dependencies
