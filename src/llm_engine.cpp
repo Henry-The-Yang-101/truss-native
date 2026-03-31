@@ -111,8 +111,6 @@ struct LLMEngine::Impl {
     }
 };
 
-// --- LLMEngine Public Methods ---
-
 LLMEngine::LLMEngine(const std::string& model_path) 
     : pimpl_(std::make_unique<Impl>(model_path)) {}
 
