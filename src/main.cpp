@@ -1,5 +1,5 @@
 #include "httplib.h"
-#include "llm_engine.h"
+#include "language_models.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <memory>
@@ -7,20 +7,8 @@
 
 using json = nlohmann::json;
 
-std::unique_ptr<LLMEngine> engine = nullptr;
-
+std::unique_ptr<LargeLanguageModel> active_model = nullptr;
 std::mutex engine_mutex;
-
-std::string current_model_family = "";
-
-std::string format_prompt(const std::string& raw_prompt, const std::string& family) {
-    if (family == "llama3") {
-        return "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n" + raw_prompt + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
-    } else if (family == "qwen") {
-        return "<|im_start|>user\n" + raw_prompt + "<|im_end|>\n<|im_start|>assistant\n";
-    }
-    return raw_prompt;
-}
 
 int main() {
     httplib::Server svr;
@@ -29,39 +17,43 @@ int main() {
         std::lock_guard<std::mutex> lock(engine_mutex);
         try {
             auto req_body = json::parse(req.body);
-            std::string model_path = req_body["model_path"];
-            current_model_family = req_body.value("family", "llama3");
+            std::string keyword = req_body["model"];
 
-            std::cout << "\n[API] Unloading previous model from memory (if any)..." << std::endl;
-            engine.reset();
+            std::cout << "\n[API] Unloading previous model from memory..." << std::endl;
+            active_model.reset(); 
 
-            std::cout << "[API] Loading new model: " << model_path << "..." << std::endl;
-            engine = std::make_unique<LLMEngine>(model_path);
+            std::cout << "[API] Initializing model keyword: " << keyword << "..." << std::endl;
 
-            res.set_content(json({{"status", "success"}, {"message", "Model loaded into RAM"}}).dump(), "application/json");
+            if (keyword == "llama-3") {
+                active_model = std::make_unique<Llama3_8B>();
+            } else if (keyword == "qwen-2.5") {
+                active_model = std::make_unique<Qwen2_5_32B>();
+            } else if (keyword == "qwen-3-coder") {
+                active_model = std::make_unique<Qwen3Coder_30B>();
+            } else {
+                throw std::runtime_error("Unknown model keyword. Available: llama-3, qwen-2.5, qwen-3-coder");
+            }
+
+            res.set_content(json({{"status", "success"}, {"message", keyword + " loaded into RAM"}}).dump(), "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
             res.set_content(json({{"status", "error"}, {"message", std::string("Initialization failed: ") + e.what()}}).dump(), "application/json");
         }
     });
 
-    // --- ENDPOINT 2: Generate text using loaded model ---
     svr.Post("/v1/predict", [&](const httplib::Request &req, httplib::Response &res) {
         std::lock_guard<std::mutex> lock(engine_mutex);
 
-        // Safety check: Did they load a model yet?
-        if (!engine) {
+        if (!active_model) {
             res.status = 400;
-            res.set_content(json({{"status", "error"}, {"message", "No model is currently loaded in RAM. Call /v1/initialize first."}}).dump(), "application/json");
+            res.set_content(json({{"status", "error"}, {"message", "No model loaded. Call /v1/initialize first."}}).dump(), "application/json");
             return;
         }
 
         auto req_body = json::parse(req.body);
         std::string raw_prompt = req_body["prompt"];
         
-        // Wrap the text in the correct model's syntax before sending to the GPU
-        std::string formatted_prompt = format_prompt(raw_prompt, current_model_family);
-        std::string output = engine->generate(formatted_prompt);
+        std::string output = active_model->generate(raw_prompt);
 
         json res_body = {{"model_output", output}};
         res.set_content(res_body.dump(), "application/json");
