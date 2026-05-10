@@ -27,6 +27,7 @@ struct LLMEngine::Impl {
         ctx_params.flash_attn_type =
             flash_attention ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
         ctx_params.n_ctx = MAX_CONTEXT;
+        ctx_params.n_batch = MAX_CONTEXT;
 
         ctx = llama_new_context_with_model(model, ctx_params);
         if (!ctx) throw std::runtime_error("Failed to create context");
@@ -61,7 +62,7 @@ struct LLMEngine::Impl {
         llama_sampler_chain_add(smpl, llama_sampler_init_temp(config.temperature));
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy()); 
 
-        llama_batch batch = llama_batch_init(2048, 0, 1);
+        llama_batch batch = llama_batch_init(MAX_CONTEXT, 0, 1);
         batch.n_tokens = 0;
 
         for (int i = 0; i < tokens.size(); i++) {
