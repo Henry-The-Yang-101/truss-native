@@ -73,18 +73,39 @@ int main() {
             if (!active_model) {
                 res.status = 400;
                 res.set_content(
-                    json({{"error", json{{"message", "No model loaded. Call /v1/initialize first."}, {"type", "invalid_request_error"}}}})
+                    json({{"error", json{{"message", "No model loaded. Call /v1/initialize first."},
+                                      {"type", "invalid_request_error"},
+                                      {"param", nullptr},
+                                      {"code", "model_not_found"}}}})
                         .dump(),
                     "application/json");
                 return;
             }
 
             auto req_body = json::parse(req.body);
+
+            if (req_body.contains("model") && req_body["model"].is_string()) {
+                std::string requested_model = req_body["model"].get<std::string>();
+                if (requested_model != active_model_id) {
+                    res.status = 400;
+                    res.set_content(
+                        json({{"error", json{{"message", "Model mismatch. Currently initialized: " + active_model_id + ". Requested: " + requested_model + ". Call /v1/initialize to switch models."},
+                                          {"type", "invalid_request_error"},
+                                          {"param", "model"},
+                                          {"code", "model_not_found"}}}})
+                            .dump(),
+                        "application/json");
+                    return;
+                }
+            }
+
             if (!req_body.contains("messages") || !validate_chat_messages(req_body["messages"])) {
                 res.status = 400;
                 res.set_content(
                     json({{"error", json{{"message", "Invalid or missing 'messages' array (each item needs string 'role' and 'content')."},
-                                      {"type", "invalid_request_error"}}}})
+                                      {"type", "invalid_request_error"},
+                                      {"param", "messages"},
+                                      {"code", nullptr}}}})
                         .dump(),
                     "application/json");
                 return;
@@ -124,7 +145,9 @@ int main() {
         } catch (const json::exception& e) {
             res.status = 400;
             res.set_content(json({{"error", json{{"message", std::string("Malformed JSON body: ") + e.what()},
-                                                  {"type", "invalid_request_error"}}}})
+                                                  {"type", "invalid_request_error"},
+                                                  {"param", nullptr},
+                                                  {"code", nullptr}}}})
                                 .dump(),
                             "application/json");
         }
@@ -135,9 +158,9 @@ int main() {
             {"object", "list"},
             {"data",
              json::array({
-                 {{"id", "llama-3"}, {"object", "model"}, {"owned_by", "truss-native"}},
-                 {{"id", "qwen-2.5"}, {"object", "model"}, {"owned_by", "truss-native"}},
-                 {{"id", "qwen-3-coder"}, {"object", "model"}, {"owned_by", "truss-native"}},
+                 {{"id", "llama-3"}, {"object", "model"}, {"created", 1715299200}, {"owned_by", "truss-native"}},
+                 {{"id", "qwen-2.5"}, {"object", "model"}, {"created", 1715299200}, {"owned_by", "truss-native"}},
+                 {{"id", "qwen-3-coder"}, {"object", "model"}, {"created", 1715299200}, {"owned_by", "truss-native"}},
              })}};
 
         res.set_content(models_list.dump(), "application/json");
