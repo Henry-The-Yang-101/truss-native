@@ -1,6 +1,7 @@
 #pragma once
 #include "llm_engine.h"
 #include <nlohmann/json.hpp>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -15,9 +16,10 @@ public:
     virtual ~LargeLanguageModel() = default;
     virtual std::string format_messages(const nlohmann::json& messages) const = 0;
 
-    std::string generate(const nlohmann::json& messages, const GenerationConfig& config = GenerationConfig()) {
+    std::string generate(const nlohmann::json& messages, const GenerationConfig& config = GenerationConfig(),
+                         std::function<bool(const std::string&)> token_callback = nullptr) {
         std::string formatted_prompt = format_messages(messages);
-        return engine_->generate(formatted_prompt, config);
+        return engine_->generate(formatted_prompt, config, std::move(token_callback));
     }
 };
 

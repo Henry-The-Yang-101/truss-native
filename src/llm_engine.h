@@ -1,6 +1,7 @@
 #pragma once
-#include <string>
+#include <functional>
 #include <memory>
+#include <string>
 
 struct GenerationConfig {
     int max_tokens = 8192;
@@ -15,7 +16,8 @@ public:
     LLMEngine(const LLMEngine&) = delete;
     LLMEngine& operator=(const LLMEngine&) = delete;
 
-    std::string generate(const std::string& prompt, const GenerationConfig& config = GenerationConfig());
+    std::string generate(const std::string& prompt, const GenerationConfig& config = GenerationConfig(),
+                         std::function<bool(const std::string&)> token_callback = nullptr);
 
 private:
     struct Impl;

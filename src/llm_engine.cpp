@@ -1,5 +1,6 @@
 #include "llm_engine.h"
 #include "llama.h"
+#include <functional>
 #include <vector>
 #include <stdexcept>
 #include <iostream>
@@ -36,7 +37,8 @@ struct LLMEngine::Impl {
         llama_backend_free();
     }
 
-    std::string generate_text(const std::string& prompt, const GenerationConfig& config) {
+    std::string generate_text(const std::string& prompt, const GenerationConfig& config,
+                              const std::function<bool(const std::string&)>& token_callback) {
         const llama_vocab* vocab = llama_model_get_vocab(model);
 
         std::vector<llama_token> tokens(prompt.length() + 2);
@@ -89,7 +91,13 @@ struct LLMEngine::Impl {
 
             char buf[128];
             int n_chars = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
-            if (n_chars > 0) result += std::string(buf, n_chars);
+            if (n_chars > 0) {
+                std::string piece(buf, static_cast<size_t>(n_chars));
+                result += piece;
+                if (token_callback && !token_callback(piece)) {
+                    break;
+                }
+            }
 
             batch.n_tokens = 0;
             batch.token[batch.n_tokens] = new_token_id;
@@ -116,9 +124,10 @@ LLMEngine::LLMEngine(const std::string& model_path)
 
 LLMEngine::~LLMEngine() = default;
 
-std::string LLMEngine::generate(const std::string& prompt, const GenerationConfig& config) {
+std::string LLMEngine::generate(const std::string& prompt, const GenerationConfig& config,
+                                std::function<bool(const std::string&)> token_callback) {
     try {
-        return pimpl_->generate_text(prompt, config);
+        return pimpl_->generate_text(prompt, config, token_callback);
     } catch (const std::exception& e) {
         std::cerr << "[LLMEngine Error] " << e.what() << std::endl;
         return "Error during generation: " + std::string(e.what());

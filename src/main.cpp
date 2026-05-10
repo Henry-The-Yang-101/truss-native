@@ -7,6 +7,7 @@
 #include <mutex>
 #include <random>
 #include <string>
+#include <utility>
 
 using json = nlohmann::json;
 
@@ -67,10 +68,37 @@ int main() {
     });
 
     svr.Post("/v1/chat/completions", [&](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> lock(engine_mutex);
+        json req_body;
+
+        try {
+            req_body = json::parse(req.body);
+        } catch (const json::exception& e) {
+            res.status = 400;
+            res.set_content(json({{"error", json{{"message", std::string("Malformed JSON body: ") + e.what()},
+                                                  {"type", "invalid_request_error"},
+                                                  {"param", nullptr},
+                                                  {"code", nullptr}}}})
+                                .dump(),
+                            "application/json");
+            return;
+        }
+
+        const bool stream_requested =
+            req_body.contains("stream") && req_body["stream"].is_boolean() && req_body["stream"].get<bool>();
+
+        GenerationConfig config;
+        if (req_body.contains("temperature") && req_body["temperature"].is_number()) {
+            config.temperature = static_cast<float>(req_body["temperature"].get<double>());
+        }
+        if (req_body.contains("max_tokens") && req_body["max_tokens"].is_number()) {
+            config.max_tokens = static_cast<int>(req_body["max_tokens"].get<double>());
+        }
+
+        std::unique_lock<std::mutex> lk(engine_mutex);
 
         try {
             if (!active_model) {
+                lk.unlock();
                 res.status = 400;
                 res.set_content(
                     json({{"error", json{{"message", "No model loaded. Call /v1/initialize first."},
@@ -82,11 +110,10 @@ int main() {
                 return;
             }
 
-            auto req_body = json::parse(req.body);
-
             if (req_body.contains("model") && req_body["model"].is_string()) {
                 std::string requested_model = req_body["model"].get<std::string>();
                 if (requested_model != active_model_id) {
+                    lk.unlock();
                     res.status = 400;
                     res.set_content(
                         json({{"error", json{{"message", "Model mismatch. Currently initialized: " + active_model_id + ". Requested: " + requested_model + ". Call /v1/initialize to switch models."},
@@ -100,6 +127,7 @@ int main() {
             }
 
             if (!req_body.contains("messages") || !validate_chat_messages(req_body["messages"])) {
+                lk.unlock();
                 res.status = 400;
                 res.set_content(
                     json({{"error", json{{"message", "Invalid or missing 'messages' array (each item needs string 'role' and 'content')."},
@@ -111,16 +139,59 @@ int main() {
                 return;
             }
 
-            GenerationConfig config;
-            if (req_body.contains("temperature") && req_body["temperature"].is_number()) {
-                config.temperature = static_cast<float>(req_body["temperature"].get<double>());
-            }
-            if (req_body.contains("max_tokens") && req_body["max_tokens"].is_number()) {
-                config.max_tokens = static_cast<int>(req_body["max_tokens"].get<double>());
+            json messages_payload = req_body["messages"];
+
+            if (stream_requested) {
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                std::string completion_id = "chatcmpl-" + std::to_string(gen());
+
+                lk.unlock();
+
+                GenerationConfig streaming_config = config;
+                res.set_chunked_content_provider(
+                    "text/event-stream",
+                    [completion_id = std::move(completion_id), messages_payload = std::move(messages_payload),
+                     streaming_config](size_t offset, httplib::DataSink &sink) mutable -> bool {
+                        if (offset > 0) {
+                            sink.done();
+                            return true;
+                        }
+
+                        {
+                            std::lock_guard<std::mutex> gen_lock(engine_mutex);
+                            if (!active_model) {
+                                sink.done();
+                                return true;
+                            }
+
+                            auto token_cb = [completion_id, &sink](const std::string &piece) -> bool {
+                                json choice = json::object({{"index", 0},
+                                                            {"delta", json::object({{"content", piece}})},
+                                                            {"finish_reason", nullptr}});
+                                json chunk = json::object({{"id", completion_id},
+                                                           {"object", "chat.completion.chunk"},
+                                                           {"choices", json::array({choice})}});
+                                std::string line = std::string("data: ") + chunk.dump() + "\n\n";
+                                if (!sink.write(line.data(), line.size())) {
+                                    return false;
+                                }
+                                return sink.is_writable();
+                            };
+
+                            (void)active_model->generate(messages_payload, streaming_config, token_cb);
+                        }
+
+                        constexpr const char k_done[] = "data: [DONE]\n\n";
+                        sink.write(k_done, sizeof(k_done) - 1);
+                        sink.done();
+                        return true;
+                    });
+                return;
             }
 
-            const json& messages = req_body["messages"];
-            std::string output = active_model->generate(messages, config);
+            std::string output = active_model->generate(messages_payload, config);
+            lk.unlock();
 
             const auto created = std::chrono::duration_cast<std::chrono::seconds>(
                                      std::chrono::system_clock::now().time_since_epoch())
@@ -143,6 +214,9 @@ int main() {
                  })}};
             res.set_content(res_body.dump(), "application/json");
         } catch (const json::exception& e) {
+            if (lk.owns_lock()) {
+                lk.unlock();
+            }
             res.status = 400;
             res.set_content(json({{"error", json{{"message", std::string("Malformed JSON body: ") + e.what()},
                                                   {"type", "invalid_request_error"},
