@@ -1,5 +1,6 @@
 #include "httplib.h"
 #include "language_models.h"
+#include "inference_queue.h"
 #include <nlohmann/json.hpp>
 #include <chrono>
 #include <iostream>
@@ -8,12 +9,17 @@
 #include <random>
 #include <string>
 #include <utility>
+#include <thread>
+#include <atomic>
 
 using json = nlohmann::json;
 
 std::unique_ptr<LargeLanguageModel> active_model = nullptr;
 std::string active_model_id;
-std::mutex engine_mutex;
+std::mutex init_mutex;
+
+InferenceQueue req_queue;
+std::atomic<bool> server_running{true};
 
 static bool validate_chat_messages(const json& messages) {
     if (!messages.is_array() || messages.empty()) {
@@ -32,11 +38,48 @@ static bool validate_chat_messages(const json& messages) {
     return true;
 }
 
+void inference_worker_loop() {
+    while (server_running) {
+        InferenceRequest req = req_queue.pop_request();
+        
+        if (!server_running) {
+            try {
+                req.promise.set_exception(std::make_exception_ptr(std::runtime_error("Server shutting down")));
+            } catch (...) {}
+            break;
+        }
+
+        try {
+            LargeLanguageModel* current_model = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(init_mutex);
+                if (active_model) {
+                    current_model = active_model.get();
+                }
+            }
+            
+            if (!current_model) {
+                req.promise.set_exception(std::make_exception_ptr(std::runtime_error("Model was unloaded before request could be processed.")));
+                continue;
+            }
+
+            std::string result = current_model->generate(req.messages_payload, req.config, req.token_callback);
+            req.promise.set_value(result);
+        } catch (...) {
+            try {
+                req.promise.set_exception(std::current_exception());
+            } catch (...) {}
+        }
+    }
+}
+
 int main() {
     httplib::Server svr;
 
+    std::thread inference_worker(inference_worker_loop);
+
     svr.Post("/v1/initialize", [&](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> lock(engine_mutex);
+        std::lock_guard<std::mutex> lock(init_mutex);
         try {
             auto req_body = json::parse(req.body);
             std::string keyword = req_body["model"];
@@ -94,11 +137,9 @@ int main() {
             config.max_tokens = static_cast<int>(req_body["max_tokens"].get<double>());
         }
 
-        std::unique_lock<std::mutex> lk(engine_mutex);
-
-        try {
+        {
+            std::lock_guard<std::mutex> lock(init_mutex);
             if (!active_model) {
-                lk.unlock();
                 res.status = 400;
                 res.set_content(
                     json({{"error", json{{"message", "No model loaded. Call /v1/initialize first."},
@@ -113,7 +154,6 @@ int main() {
             if (req_body.contains("model") && req_body["model"].is_string()) {
                 std::string requested_model = req_body["model"].get<std::string>();
                 if (requested_model != active_model_id) {
-                    lk.unlock();
                     res.status = 400;
                     res.set_content(
                         json({{"error", json{{"message", "Model mismatch. Currently initialized: " + active_model_id + ". Requested: " + requested_model + ". Call /v1/initialize to switch models."},
@@ -125,106 +165,119 @@ int main() {
                     return;
                 }
             }
+        }
 
-            if (!req_body.contains("messages") || !validate_chat_messages(req_body["messages"])) {
-                lk.unlock();
-                res.status = 400;
-                res.set_content(
-                    json({{"error", json{{"message", "Invalid or missing 'messages' array (each item needs string 'role' and 'content')."},
-                                      {"type", "invalid_request_error"},
-                                      {"param", "messages"},
-                                      {"code", nullptr}}}})
-                        .dump(),
-                    "application/json");
-                return;
-            }
+        if (!req_body.contains("messages") || !validate_chat_messages(req_body["messages"])) {
+            res.status = 400;
+            res.set_content(
+                json({{"error", json{{"message", "Invalid or missing 'messages' array (each item needs string 'role' and 'content')."},
+                                  {"type", "invalid_request_error"},
+                                  {"param", "messages"},
+                                  {"code", nullptr}}}})
+                    .dump(),
+                "application/json");
+            return;
+        }
 
-            json messages_payload = req_body["messages"];
+        json messages_payload = req_body["messages"];
 
-            if (stream_requested) {
-                std::random_device rd;
-                std::mt19937_64 gen(rd());
-                std::string completion_id = "chatcmpl-" + std::to_string(gen());
-
-                lk.unlock();
-
-                GenerationConfig streaming_config = config;
-                res.set_chunked_content_provider(
-                    "text/event-stream",
-                    [completion_id = std::move(completion_id), messages_payload = std::move(messages_payload),
-                     streaming_config](size_t offset, httplib::DataSink &sink) mutable -> bool {
-                        if (offset > 0) {
-                            sink.done();
-                            return true;
-                        }
-
-                        {
-                            std::lock_guard<std::mutex> gen_lock(engine_mutex);
-                            if (!active_model) {
-                                sink.done();
-                                return true;
-                            }
-
-                            auto token_cb = [completion_id, &sink](const std::string &piece) -> bool {
-                                json choice = json::object({{"index", 0},
-                                                            {"delta", json::object({{"content", piece}})},
-                                                            {"finish_reason", nullptr}});
-                                json chunk = json::object({{"id", completion_id},
-                                                           {"object", "chat.completion.chunk"},
-                                                           {"choices", json::array({choice})}});
-                                std::string line = std::string("data: ") + chunk.dump() + "\n\n";
-                                if (!sink.write(line.data(), line.size())) {
-                                    return false;
-                                }
-                                return sink.is_writable();
-                            };
-
-                            (void)active_model->generate(messages_payload, streaming_config, token_cb);
-                        }
-
-                        constexpr const char k_done[] = "data: [DONE]\n\n";
-                        sink.write(k_done, sizeof(k_done) - 1);
-                        sink.done();
-                        return true;
-                    });
-                return;
-            }
-
-            std::string output = active_model->generate(messages_payload, config);
-            lk.unlock();
-
-            const auto created = std::chrono::duration_cast<std::chrono::seconds>(
-                                     std::chrono::system_clock::now().time_since_epoch())
-                                     .count();
-
+        if (stream_requested) {
             std::random_device rd;
             std::mt19937_64 gen(rd());
-            std::string id = "chatcmpl-" + std::to_string(gen());
+            std::string completion_id = "chatcmpl-" + std::to_string(gen());
 
-            json res_body = {
-                {"id", id},
-                {"object", "chat.completion"},
-                {"created", created},
-                {"model", active_model_id},
-                {"choices",
-                 json::array({
-                     json{{"index", 0},
-                          {"message", json{{"role", "assistant"}, {"content", output}}},
-                          {"finish_reason", "stop"}},
-                 })}};
-            res.set_content(res_body.dump(), "application/json");
-        } catch (const json::exception& e) {
-            if (lk.owns_lock()) {
-                lk.unlock();
-            }
-            res.status = 400;
-            res.set_content(json({{"error", json{{"message", std::string("Malformed JSON body: ") + e.what()},
-                                                  {"type", "invalid_request_error"},
-                                                  {"param", nullptr},
-                                                  {"code", nullptr}}}})
-                                .dump(),
-                            "application/json");
+            res.set_chunked_content_provider(
+                "text/event-stream",
+                [completion_id = std::move(completion_id), messages_payload = std::move(messages_payload),
+                 config](size_t offset, httplib::DataSink &sink) mutable -> bool {
+                    if (offset > 0) {
+                        sink.done();
+                        return true;
+                    }
+
+                    auto token_cb = [completion_id, &sink](const std::string &piece) -> bool {
+                        json choice = json::object({{"index", 0},
+                                                    {"delta", json::object({{"content", piece}})},
+                                                    {"finish_reason", nullptr}});
+                        json chunk = json::object({{"id", completion_id},
+                                                   {"object", "chat.completion.chunk"},
+                                                   {"choices", json::array({choice})}});
+                        std::string line = std::string("data: ") + chunk.dump() + "\n\n";
+                        if (!sink.write(line.data(), line.size())) {
+                            return false;
+                        }
+                        return sink.is_writable();
+                    };
+
+                    InferenceRequest inf_req;
+                    inf_req.messages_payload = messages_payload;
+                    inf_req.config = config;
+                    inf_req.token_callback = token_cb;
+                    
+                    std::promise<std::string> promise;
+                    auto future = promise.get_future();
+                    inf_req.promise = std::move(promise);
+
+                    req_queue.push_request(std::move(inf_req));
+
+                    try {
+                        future.get();
+                    } catch (...) {
+
+                    }
+
+                    constexpr const char k_done[] = "data: [DONE]\n\n";
+                    sink.write(k_done, sizeof(k_done) - 1);
+                    sink.done();
+                    return true;
+                });
+            return;
         }
+
+        InferenceRequest inf_req;
+        inf_req.messages_payload = messages_payload;
+        inf_req.config = config;
+        inf_req.token_callback = nullptr;
+
+        std::promise<std::string> promise;
+        auto future = promise.get_future();
+        inf_req.promise = std::move(promise);
+
+        req_queue.push_request(std::move(inf_req));
+
+        std::string output;
+        try {
+            output = future.get();
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_content(json({{"error", json{{"message", e.what()},
+                                              {"type", "internal_server_error"},
+                                              {"param", nullptr},
+                                              {"code", nullptr}}}})
+                            .dump(), "application/json");
+            return;
+        }
+
+        const auto created = std::chrono::duration_cast<std::chrono::seconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+
+        std::random_device rd;
+        std::mt19937_64 gen(rd());
+        std::string id = "chatcmpl-" + std::to_string(gen());
+
+        json res_body = {
+            {"id", id},
+            {"object", "chat.completion"},
+            {"created", created},
+            {"model", active_model_id},
+            {"choices",
+             json::array({
+                 json{{"index", 0},
+                      {"message", json{{"role", "assistant"}, {"content", output}}},
+                      {"finish_reason", "stop"}},
+             })}};
+        res.set_content(res_body.dump(), "application/json");
     });
 
     svr.Get("/v1/models", [&](const httplib::Request &req, httplib::Response &res) {
@@ -243,5 +296,15 @@ int main() {
     std::cout << "Dynamic API Server running on port 8080" << std::endl;
     std::cout << "Waiting for an initialization request..." << std::endl;
     svr.listen("0.0.0.0", 8080);
+    
+    server_running = false;
+
+    InferenceRequest dummy_req;
+    std::promise<std::string> dummy_promise;
+    dummy_req.promise = std::move(dummy_promise);
+    req_queue.push_request(std::move(dummy_req));
+    
+    inference_worker.join();
+    
     return 0;
 }

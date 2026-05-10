@@ -18,7 +18,8 @@ FetchContent_Declare(
 set(GGML_METAL ON CACHE BOOL "Enable Metal" FORCE) 
 FetchContent_MakeAvailable(llama)
 
-add_executable(truss_server src/main.cpp src/llm_engine.cpp)
+add_executable(truss_server src/main.cpp src/llm_engine.cpp src/inference_queue.h)
+target_include_directories(truss_server PRIVATE src)
 
 target_link_libraries(truss_server PRIVATE 
     yaml-cpp

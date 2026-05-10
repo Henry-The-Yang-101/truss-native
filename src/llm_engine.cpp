@@ -41,6 +41,9 @@ struct LLMEngine::Impl {
                               const std::function<bool(const std::string&)>& token_callback) {
         const llama_vocab* vocab = llama_model_get_vocab(model);
 
+        llama_memory_clear(llama_get_memory(ctx), true);
+        n_past = 0;
+
         std::vector<llama_token> tokens(prompt.length() + 2);
         
         int n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), false, true);
@@ -49,12 +52,6 @@ struct LLMEngine::Impl {
             n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), false, true);
         }
         tokens.resize(n_tokens);
-
-        if (n_past + tokens.size() >= MAX_CONTEXT) {
-            std::cout << "\n[LLMEngine] Context limit reached. Resetting conversation memory." << std::endl;
-            llama_memory_clear(llama_get_memory(ctx), true);
-            n_past = 0;
-        }
 
         if (smpl) llama_sampler_free(smpl);
         llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
