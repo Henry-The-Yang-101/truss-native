@@ -1,14 +1,35 @@
 #include "httplib.h"
 #include "language_models.h"
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <random>
+#include <string>
 
 using json = nlohmann::json;
 
 std::unique_ptr<LargeLanguageModel> active_model = nullptr;
+std::string active_model_id;
 std::mutex engine_mutex;
+
+static bool validate_chat_messages(const json& messages) {
+    if (!messages.is_array() || messages.empty()) {
+        return false;
+    }
+    for (const auto& msg : messages) {
+        if (!msg.is_object() || !msg.contains("role") || !msg.contains("content")) {
+            return false;
+        }
+        const auto& role = msg["role"];
+        const auto& content = msg["content"];
+        if (!role.is_string() || !content.is_string()) {
+            return false;
+        }
+    }
+    return true;
+}
 
 int main() {
     httplib::Server svr;
@@ -20,16 +41,20 @@ int main() {
             std::string keyword = req_body["model"];
 
             std::cout << "\n[API] Unloading previous model from memory..." << std::endl;
-            active_model.reset(); 
+            active_model.reset();
+            active_model_id.clear();
 
             std::cout << "[API] Initializing model keyword: " << keyword << "..." << std::endl;
 
             if (keyword == "llama-3") {
                 active_model = std::make_unique<Llama3_8B>();
+                active_model_id = "llama-3";
             } else if (keyword == "qwen-2.5") {
                 active_model = std::make_unique<Qwen2_5_32B>();
+                active_model_id = "qwen-2.5";
             } else if (keyword == "qwen-3-coder") {
                 active_model = std::make_unique<Qwen3Coder_30B>();
+                active_model_id = "qwen-3-coder";
             } else {
                 throw std::runtime_error("Unknown model keyword. Available: llama-3, qwen-2.5, qwen-3-coder");
             }
@@ -41,53 +66,81 @@ int main() {
         }
     });
 
-    svr.Post("/v1/predict", [&](const httplib::Request &req, httplib::Response &res) {
+    svr.Post("/v1/chat/completions", [&](const httplib::Request &req, httplib::Response &res) {
         std::lock_guard<std::mutex> lock(engine_mutex);
 
-        if (!active_model) {
+        try {
+            if (!active_model) {
+                res.status = 400;
+                res.set_content(
+                    json({{"error", json{{"message", "No model loaded. Call /v1/initialize first."}, {"type", "invalid_request_error"}}}})
+                        .dump(),
+                    "application/json");
+                return;
+            }
+
+            auto req_body = json::parse(req.body);
+            if (!req_body.contains("messages") || !validate_chat_messages(req_body["messages"])) {
+                res.status = 400;
+                res.set_content(
+                    json({{"error", json{{"message", "Invalid or missing 'messages' array (each item needs string 'role' and 'content')."},
+                                      {"type", "invalid_request_error"}}}})
+                        .dump(),
+                    "application/json");
+                return;
+            }
+
+            GenerationConfig config;
+            if (req_body.contains("temperature") && req_body["temperature"].is_number()) {
+                config.temperature = static_cast<float>(req_body["temperature"].get<double>());
+            }
+            if (req_body.contains("max_tokens") && req_body["max_tokens"].is_number()) {
+                config.max_tokens = static_cast<int>(req_body["max_tokens"].get<double>());
+            }
+
+            const json& messages = req_body["messages"];
+            std::string output = active_model->generate(messages, config);
+
+            const auto created = std::chrono::duration_cast<std::chrono::seconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
+
+            std::random_device rd;
+            std::mt19937_64 gen(rd());
+            std::string id = "chatcmpl-" + std::to_string(gen());
+
+            json res_body = {
+                {"id", id},
+                {"object", "chat.completion"},
+                {"created", created},
+                {"model", active_model_id},
+                {"choices",
+                 json::array({
+                     json{{"index", 0},
+                          {"message", json{{"role", "assistant"}, {"content", output}}},
+                          {"finish_reason", "stop"}},
+                 })}};
+            res.set_content(res_body.dump(), "application/json");
+        } catch (const json::exception& e) {
             res.status = 400;
-            res.set_content(json({{"status", "error"}, {"message", "No model loaded. Call /v1/initialize first."}}).dump(), "application/json");
-            return;
+            res.set_content(json({{"error", json{{"message", std::string("Malformed JSON body: ") + e.what()},
+                                                  {"type", "invalid_request_error"}}}})
+                                .dump(),
+                            "application/json");
         }
-
-        auto req_body = json::parse(req.body);
-        std::string raw_prompt = req_body["prompt"];
-        
-        std::string output = active_model->generate(raw_prompt);
-
-        json res_body = {{"model_output", output}};
-        res.set_content(res_body.dump(), "application/json");
     });
 
     svr.Get("/v1/models", [&](const httplib::Request &req, httplib::Response &res) {
         json models_list = {
             {"object", "list"},
-            {"data", {
-                {
-                    {"id", "llama-3"},
-                    {"family", "Llama 3"},
-                    {"parameters", "8B"},
-                    {"quantization", "Q4_K_M"},
-                    {"description", "Fast, general-purpose instruction model."}
-                },
-                {
-                    {"id", "qwen-2.5"},
-                    {"family", "Qwen 2.5"},
-                    {"parameters", "32B"},
-                    {"quantization", "Q3_K_L"},
-                    {"description", "Massive, highly capable reasoning and chat model."}
-                },
-                {
-                    {"id", "qwen-3-coder"},
-                    {"family", "Qwen 3"},
-                    {"parameters", "30B (MoE)"},
-                    {"quantization", "Q4_K_M"},
-                    {"description", "Mixture-of-Experts model optimized specifically for programming."}
-                }
-            }}
-        };
+            {"data",
+             json::array({
+                 {{"id", "llama-3"}, {"object", "model"}, {"owned_by", "truss-native"}},
+                 {{"id", "qwen-2.5"}, {"object", "model"}, {"owned_by", "truss-native"}},
+                 {{"id", "qwen-3-coder"}, {"object", "model"}, {"owned_by", "truss-native"}},
+             })}};
 
-        res.set_content(models_list.dump(4), "application/json");
+        res.set_content(models_list.dump(), "application/json");
     });
 
     std::cout << "Dynamic API Server running on port 8080" << std::endl;
