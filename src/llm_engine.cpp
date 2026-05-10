@@ -13,7 +13,7 @@ struct LLMEngine::Impl {
     int n_past = 0; 
     const int MAX_CONTEXT = 4096; 
 
-    Impl(const std::string& model_path) {
+    Impl(const std::string& model_path, bool flash_attention) {
         llama_backend_init();
 
         llama_model_params model_params = llama_model_default_params();
@@ -24,8 +24,10 @@ struct LLMEngine::Impl {
         if (!model) throw std::runtime_error("Failed to load model from " + model_path);
 
         llama_context_params ctx_params = llama_context_default_params();
-        ctx_params.n_ctx = MAX_CONTEXT; 
-        
+        ctx_params.flash_attn_type =
+            flash_attention ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        ctx_params.n_ctx = MAX_CONTEXT;
+
         ctx = llama_new_context_with_model(model, ctx_params);
         if (!ctx) throw std::runtime_error("Failed to create context");
     }
@@ -116,8 +118,8 @@ struct LLMEngine::Impl {
     }
 };
 
-LLMEngine::LLMEngine(const std::string& model_path) 
-    : pimpl_(std::make_unique<Impl>(model_path)) {}
+LLMEngine::LLMEngine(const std::string& model_path, bool flash_attention)
+    : pimpl_(std::make_unique<Impl>(model_path, flash_attention)) {}
 
 LLMEngine::~LLMEngine() = default;
 

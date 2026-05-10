@@ -10,7 +10,7 @@ struct GenerationConfig {
 
 class LLMEngine {
 public:
-    explicit LLMEngine(const std::string& model_path);
+    explicit LLMEngine(const std::string& model_path, bool flash_attention = true);
     ~LLMEngine();
 
     LLMEngine(const LLMEngine&) = delete;

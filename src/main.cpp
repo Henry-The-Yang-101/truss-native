@@ -84,6 +84,15 @@ int main() {
             auto req_body = json::parse(req.body);
             std::string keyword = req_body["model"];
 
+            bool flash_attention = true;
+            if (req_body.contains("flash_attention")) {
+                const auto &fa = req_body["flash_attention"];
+                if (!fa.is_boolean()) {
+                    throw std::runtime_error("'flash_attention' must be a boolean");
+                }
+                flash_attention = fa.get<bool>();
+            }
+
             std::cout << "\n[API] Unloading previous model from memory..." << std::endl;
             active_model.reset();
             active_model_id.clear();
@@ -91,19 +100,23 @@ int main() {
             std::cout << "[API] Initializing model keyword: " << keyword << "..." << std::endl;
 
             if (keyword == "llama-3") {
-                active_model = std::make_unique<Llama3_8B>();
+                active_model = std::make_unique<Llama3_8B>(flash_attention);
                 active_model_id = "llama-3";
             } else if (keyword == "qwen-2.5") {
-                active_model = std::make_unique<Qwen2_5_32B>();
+                active_model = std::make_unique<Qwen2_5_32B>(flash_attention);
                 active_model_id = "qwen-2.5";
             } else if (keyword == "qwen-3-coder") {
-                active_model = std::make_unique<Qwen3Coder_30B>();
+                active_model = std::make_unique<Qwen3Coder_30B>(flash_attention);
                 active_model_id = "qwen-3-coder";
             } else {
                 throw std::runtime_error("Unknown model keyword. Available: llama-3, qwen-2.5, qwen-3-coder");
             }
 
-            res.set_content(json({{"status", "success"}, {"message", keyword + " loaded into RAM"}}).dump(), "application/json");
+            res.set_content(json({{"status", "success"},
+                                  {"message", keyword + " loaded into RAM"},
+                                  {"flash_attention", flash_attention}})
+                                .dump(),
+                            "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
             res.set_content(json({{"status", "error"}, {"message", std::string("Initialization failed: ") + e.what()}}).dump(), "application/json");

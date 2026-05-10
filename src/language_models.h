@@ -10,8 +10,8 @@ protected:
     std::unique_ptr<LLMEngine> engine_;
 
 public:
-    LargeLanguageModel(const std::string& model_path) {
-        engine_ = std::make_unique<LLMEngine>(model_path);
+    explicit LargeLanguageModel(const std::string& model_path, bool flash_attention = true) {
+        engine_ = std::make_unique<LLMEngine>(model_path, flash_attention);
     }
     virtual ~LargeLanguageModel() = default;
     virtual std::string format_messages(const nlohmann::json& messages) const = 0;
@@ -25,7 +25,8 @@ public:
 
 class LlamaLLM : public LargeLanguageModel {
 public:
-    LlamaLLM(const std::string& model_path) : LargeLanguageModel(model_path) {}
+    explicit LlamaLLM(const std::string& model_path, bool flash_attention = true)
+        : LargeLanguageModel(model_path, flash_attention) {}
 
     std::string format_messages(const nlohmann::json& messages) const override {
         std::string out = "<|begin_of_text|>";
@@ -41,7 +42,8 @@ public:
 
 class QwenLLM : public LargeLanguageModel {
 public:
-    QwenLLM(const std::string& model_path) : LargeLanguageModel(model_path) {}
+    explicit QwenLLM(const std::string& model_path, bool flash_attention = true)
+        : LargeLanguageModel(model_path, flash_attention) {}
 
     std::string format_messages(const nlohmann::json& messages) const override {
         std::string out;
@@ -57,16 +59,19 @@ public:
 
 class Llama3_8B : public LlamaLLM {
 public:
-    Llama3_8B() : LlamaLLM("../models/llama3-8b-gguf/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf") {}
+    explicit Llama3_8B(bool flash_attention = true)
+        : LlamaLLM("../models/llama3-8b-gguf/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf", flash_attention) {}
 };
 
 class Qwen2_5_32B : public QwenLLM {
 public:
-    // Qwen2_5_32B() : QwenLLM("../models/qwen2.5-32b-gguf/Qwen2.5-32B-Instruct-Q3_K_L.gguf") {} 
-    Qwen2_5_32B() : QwenLLM("../models/qwen2.5-32b-gguf/qwen2.5-coder-32b-instruct-q4_k_m.gguf") {} 
+    // Qwen2_5_32B() : QwenLLM("../models/qwen2.5-32b-gguf/Qwen2.5-32B-Instruct-Q3_K_L.gguf") {}
+    explicit Qwen2_5_32B(bool flash_attention = true)
+        : QwenLLM("../models/qwen2.5-32b-gguf/qwen2.5-coder-32b-instruct-q4_k_m.gguf", flash_attention) {}
 };
 
 class Qwen3Coder_30B : public QwenLLM {
 public:
-    Qwen3Coder_30B() : QwenLLM("../models/qwen3-coder-30b-a3b/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf") {}
+    explicit Qwen3Coder_30B(bool flash_attention = true)
+        : QwenLLM("../models/qwen3-coder-30b-a3b/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", flash_attention) {}
 };
