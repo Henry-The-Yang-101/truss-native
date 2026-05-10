@@ -1,0 +1,101 @@
+{
+  "info": {
+    "_postman_id": "cdf8f4ad-ac29-4b32-9e95-33e4967da0f7",
+    "name": "truss-native",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "43845453",
+    "_collection_link": "https://go.postman.co/collection/43845453-cdf8f4ad-ac29-4b32-9e95-33e4967da0f7?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Initialize",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"qwen-2.5\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/v1/initialize",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "v1",
+            "initialize"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Prompt",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"prompt\": \"give me a python solution to number of islands, the leetcode question\"\n    // \"prompt\": \"now give me a solution in racket\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/v1/predict",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "v1",
+            "predict"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get models",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/v1/models",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "v1",
+            "models"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
