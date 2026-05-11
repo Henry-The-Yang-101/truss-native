@@ -91,10 +91,6 @@ def _remove_model_entry(model_id: str):
     with open(YAML_PATH, "w") as f:
         f.writelines(out)
 
-# ---------------------------------------------------------------------------
-# Prompt helpers
-# ---------------------------------------------------------------------------
-
 def _prompt_choice(prompt: str, choices: list[str]) -> str:
     numbered = "\n".join(f"  [{i+1}] {c}" for i, c in enumerate(choices))
     while True:
@@ -113,10 +109,6 @@ def _prompt_text(prompt: str, validator=None) -> str:
         if validator and not validator(val):
             continue
         return val
-
-# ---------------------------------------------------------------------------
-# HuggingFace download helpers
-# ---------------------------------------------------------------------------
 
 def _ensure_huggingface_hub():
     try:
@@ -168,15 +160,10 @@ def _download_mlx(repo_id: str, dest_dir: str):
     print(f"\nDownloading MLX model '{repo_id}' into '{dest_dir}'...")
     snapshot_download(repo_id=repo_id, local_dir=dest_dir)
 
-# ---------------------------------------------------------------------------
-# add
-# ---------------------------------------------------------------------------
-
 def cmd_add():
     existing = _parse_models_block(_load_yaml_text())
     existing_ids = {m.get("id", "") for m in existing}
 
-    # --- unique id ---
     def validate_id(val):
         if val in existing_ids:
             print(f"  ID '{val}' already exists in models.yaml — choose a different one.")
@@ -188,14 +175,11 @@ def cmd_add():
 
     model_id = _prompt_text("Enter a unique model id (e.g. llama-3-small)", validator=validate_id)
 
-    # --- type ---
     model_type = _prompt_choice("Model format?", ["llama (GGUF via llama.cpp)", "mlx (safetensors via mlx-lm)"])
     model_type = "llama" if model_type.startswith("llama") else "mlx"
 
-    # --- chat format ---
     chat_format = _prompt_choice("Chat format / prompt template?", ["llama3", "qwen"])
 
-    # --- HuggingFace repo id ---
     hf_repo = _prompt_text(
         "Paste the HuggingFace repo id (e.g. 'lmstudio-community/Meta-Llama-3-8B-Instruct-GGUF')"
     )
@@ -203,11 +187,9 @@ def cmd_add():
     _ensure_huggingface_hub()
 
     if model_type == "llama":
-        # Derive a directory name from the repo (last segment)
         dir_name = hf_repo.split("/")[-1].lower()
         dest_dir = os.path.join(LLAMA_DIR, dir_name)
         gguf_path = _download_gguf(hf_repo, dest_dir)
-        # Path stored relative to build/ (one level up from project root, then into models/)
         rel_path = "../models/llama/" + dir_name + "/" + os.path.basename(gguf_path)
     else:
         dir_name = hf_repo.split("/")[-1].lower()
@@ -227,10 +209,6 @@ def cmd_add():
     print(f"\nModel '{model_id}' added successfully.")
     print(f"  Path: {rel_path}")
     print(f"  Entry written to models/models.yaml")
-
-# ---------------------------------------------------------------------------
-# remove
-# ---------------------------------------------------------------------------
 
 def cmd_remove():
     models = _parse_models_block(_load_yaml_text())
@@ -283,10 +261,6 @@ def cmd_remove():
             print(f"Deleted directory: {abs_path}")
         else:
             print(f"Warning: path not found on disk, skipping file deletion: {abs_path}")
-
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
