@@ -18,7 +18,9 @@ cmake ..
 ```
 
 ### Compile the server
+```
 make
+```
 
 ### Download the model
 ```bash
