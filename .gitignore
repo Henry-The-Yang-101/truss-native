@@ -1,5 +1,10 @@
 
 build/
-models/
+# Ignore model weight files but keep directory structure
+models/llama/*
+!models/llama/.gitkeep
+models/mlx/*
+!models/mlx/.gitkeep
 .vscode/
 .DS_Store
+.cache/
