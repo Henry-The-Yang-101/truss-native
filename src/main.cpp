@@ -15,7 +15,7 @@
 using json = nlohmann::json;
 
 // Loaded once at startup from models.yaml
-static ModelRegistry g_registry("../models.yaml");
+static ModelRegistry g_registry("../models/models.yaml");
 
 std::unique_ptr<LargeLanguageModel> active_model = nullptr;
 std::string active_model_id;

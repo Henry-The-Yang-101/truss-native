@@ -153,7 +153,7 @@ public:
     std::unique_ptr<LargeLanguageModel> load(const std::string& id) const {
         const ModelSpec* spec = find(id);
         if (!spec) {
-            throw std::runtime_error("Unknown model id '" + id + "'. Check models.yaml.");
+            throw std::runtime_error("Unknown model id '" + id + "'. Check models/models.yaml.");
         }
 
         if (spec->type == "llama") {
