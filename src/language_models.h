@@ -1,54 +1,83 @@
 #pragma once
-#include "llm_engine.h"
+#include "llama_engine.h"
+#include "mlx_engine.h"
 #include <nlohmann/json.hpp>
+#include <yaml-cpp/yaml.h>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// Model metadata loaded from models.yaml
+// ---------------------------------------------------------------------------
+
+struct ModelSpec {
+    std::string id;
+    std::string type;         // "llama" | "mlx"
+    std::string chat_format;  // "llama3" | "qwen"
+    std::string path;
+    bool flash_attention = true;
+};
+
+// ---------------------------------------------------------------------------
+// Abstract base
+// ---------------------------------------------------------------------------
 
 class LargeLanguageModel {
-protected:
-    std::unique_ptr<LLMEngine> engine_;
-
 public:
-    explicit LargeLanguageModel(const std::string& model_path, bool flash_attention = true) {
-        engine_ = std::make_unique<LLMEngine>(model_path, flash_attention);
-    }
     virtual ~LargeLanguageModel() = default;
+
     virtual std::string format_messages(const nlohmann::json& messages) const = 0;
 
-    std::string generate(const nlohmann::json& messages, const GenerationConfig& config = GenerationConfig(),
-                         std::function<bool(const std::string&)> token_callback = nullptr) {
-        std::string formatted_prompt = format_messages(messages);
-        return engine_->generate(formatted_prompt, config, std::move(token_callback));
-    }
+    virtual std::string generate(const nlohmann::json& messages,
+                                 const GenerationConfig& config = GenerationConfig(),
+                                 std::function<bool(const std::string&)> token_callback = nullptr) = 0;
 };
+
+// ---------------------------------------------------------------------------
+// Llama-family (GGUF via llama.cpp)
+// ---------------------------------------------------------------------------
 
 class LlamaLLM : public LargeLanguageModel {
 public:
-    explicit LlamaLLM(const std::string& model_path, bool flash_attention = true)
-        : LargeLanguageModel(model_path, flash_attention) {}
+    explicit LlamaLLM(const ModelSpec& spec)
+        : engine_(spec.path, spec.flash_attention) {}
 
     std::string format_messages(const nlohmann::json& messages) const override {
         std::string out = "<|begin_of_text|>";
         for (const auto& msg : messages) {
-            std::string role = msg.at("role").get<std::string>();
+            std::string role    = msg.at("role").get<std::string>();
             std::string content = msg.at("content").get<std::string>();
             out += "<|start_header_id|>" + role + "<|end_header_id|>\n\n" + content + "<|eot_id|>";
         }
         out += "<|start_header_id|>assistant<|end_header_id|>\n\n";
         return out;
     }
+
+    std::string generate(const nlohmann::json& messages,
+                         const GenerationConfig& config = GenerationConfig(),
+                         std::function<bool(const std::string&)> token_callback = nullptr) override {
+        return engine_.generate(format_messages(messages), config, std::move(token_callback));
+    }
+
+private:
+    LlamaEngine engine_;
 };
 
-class QwenLLM : public LargeLanguageModel {
+// ---------------------------------------------------------------------------
+// Qwen-family — inherits LlamaLLM, overrides only format_messages
+// ---------------------------------------------------------------------------
+
+class QwenLLM : public LlamaLLM {
 public:
-    explicit QwenLLM(const std::string& model_path, bool flash_attention = true)
-        : LargeLanguageModel(model_path, flash_attention) {}
+    explicit QwenLLM(const ModelSpec& spec) : LlamaLLM(spec) {}
 
     std::string format_messages(const nlohmann::json& messages) const override {
         std::string out;
         for (const auto& msg : messages) {
-            std::string role = msg.at("role").get<std::string>();
+            std::string role    = msg.at("role").get<std::string>();
             std::string content = msg.at("content").get<std::string>();
             out += "<|im_start|>" + role + "\n" + content + "<|im_end|>\n";
         }
@@ -57,21 +86,99 @@ public:
     }
 };
 
-class Llama3_8B : public LlamaLLM {
+// ---------------------------------------------------------------------------
+// MLX-family (safetensors via pybind11 + mlx_lm)
+// ---------------------------------------------------------------------------
+
+class MLXLLM : public LargeLanguageModel {
 public:
-    explicit Llama3_8B(bool flash_attention = true)
-        : LlamaLLM("../models/llama3-8b-gguf/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf", flash_attention) {}
+    explicit MLXLLM(const ModelSpec& spec)
+        : engine_(spec.path), chat_format_(spec.chat_format) {}
+
+    std::string format_messages(const nlohmann::json& messages) const override {
+        if (chat_format_ == "qwen") {
+            std::string out;
+            for (const auto& msg : messages) {
+                std::string role    = msg.at("role").get<std::string>();
+                std::string content = msg.at("content").get<std::string>();
+                out += "<|im_start|>" + role + "\n" + content + "<|im_end|>\n";
+            }
+            out += "<|im_start|>assistant\n";
+            return out;
+        }
+        // Default: llama3 format
+        std::string out = "<|begin_of_text|>";
+        for (const auto& msg : messages) {
+            std::string role    = msg.at("role").get<std::string>();
+            std::string content = msg.at("content").get<std::string>();
+            out += "<|start_header_id|>" + role + "<|end_header_id|>\n\n" + content + "<|eot_id|>";
+        }
+        out += "<|start_header_id|>assistant<|end_header_id|>\n\n";
+        return out;
+    }
+
+    std::string generate(const nlohmann::json& messages,
+                         const GenerationConfig& config = GenerationConfig(),
+                         std::function<bool(const std::string&)> token_callback = nullptr) override {
+        return engine_.generate(format_messages(messages), config, std::move(token_callback));
+    }
+
+private:
+    MLXEngine engine_;
+    std::string chat_format_;
 };
 
-class Qwen2_5_32B : public QwenLLM {
-public:
-    // Qwen2_5_32B() : QwenLLM("../models/qwen2.5-32b-gguf/Qwen2.5-32B-Instruct-Q3_K_L.gguf") {}
-    explicit Qwen2_5_32B(bool flash_attention = true)
-        : QwenLLM("../models/qwen2.5-32b-gguf/qwen2.5-coder-32b-instruct-q4_k_m.gguf", flash_attention) {}
-};
+// ---------------------------------------------------------------------------
+// Model registry — reads models.yaml, creates LLM instances on demand
+// ---------------------------------------------------------------------------
 
-class Qwen3Coder_30B : public QwenLLM {
+class ModelRegistry {
 public:
-    explicit Qwen3Coder_30B(bool flash_attention = true)
-        : QwenLLM("../models/qwen3-coder-30b-a3b/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", flash_attention) {}
+    explicit ModelRegistry(const std::string& yaml_path) {
+        YAML::Node root = YAML::LoadFile(yaml_path);
+        for (const auto& node : root["models"]) {
+            ModelSpec spec;
+            spec.id           = node["id"].as<std::string>();
+            spec.type         = node["type"].as<std::string>();
+            spec.chat_format  = node["chat_format"].as<std::string>();
+            spec.path         = node["path"].as<std::string>();
+            spec.flash_attention = node["flash_attention"]
+                                       ? node["flash_attention"].as<bool>()
+                                       : true;
+            specs_.push_back(std::move(spec));
+        }
+    }
+
+    // Instantiate and return the model for the given id.
+    std::unique_ptr<LargeLanguageModel> load(const std::string& id) const {
+        const ModelSpec* spec = find(id);
+        if (!spec) {
+            throw std::runtime_error("Unknown model id '" + id + "'. Check models.yaml.");
+        }
+
+        if (spec->type == "llama") {
+            if (spec->chat_format == "qwen") {
+                return std::make_unique<QwenLLM>(*spec);
+            }
+            return std::make_unique<LlamaLLM>(*spec);
+        }
+
+        if (spec->type == "mlx") {
+            return std::make_unique<MLXLLM>(*spec);
+        }
+
+        throw std::runtime_error("Unknown model type '" + spec->type + "' for id '" + id + "'.");
+    }
+
+    const std::vector<ModelSpec>& all() const { return specs_; }
+
+private:
+    std::vector<ModelSpec> specs_;
+
+    const ModelSpec* find(const std::string& id) const {
+        for (const auto& s : specs_) {
+            if (s.id == id) return &s;
+        }
+        return nullptr;
+    }
 };

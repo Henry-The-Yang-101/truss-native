@@ -14,6 +14,9 @@
 
 using json = nlohmann::json;
 
+// Loaded once at startup from models.yaml
+static ModelRegistry g_registry("../models.yaml");
+
 std::unique_ptr<LargeLanguageModel> active_model = nullptr;
 std::string active_model_id;
 std::mutex init_mutex;
@@ -41,7 +44,7 @@ static bool validate_chat_messages(const json& messages) {
 void inference_worker_loop() {
     while (server_running) {
         InferenceRequest req = req_queue.pop_request();
-        
+
         if (!server_running) {
             try {
                 req.promise.set_exception(std::make_exception_ptr(std::runtime_error("Server shutting down")));
@@ -57,7 +60,7 @@ void inference_worker_loop() {
                     current_model = active_model.get();
                 }
             }
-            
+
             if (!current_model) {
                 req.promise.set_exception(std::make_exception_ptr(std::runtime_error("Model was unloaded before request could be processed.")));
                 continue;
@@ -82,39 +85,19 @@ int main() {
         std::lock_guard<std::mutex> lock(init_mutex);
         try {
             auto req_body = json::parse(req.body);
-            std::string keyword = req_body["model"];
-
-            bool flash_attention = true;
-            if (req_body.contains("flash_attention")) {
-                const auto &fa = req_body["flash_attention"];
-                if (!fa.is_boolean()) {
-                    throw std::runtime_error("'flash_attention' must be a boolean");
-                }
-                flash_attention = fa.get<bool>();
-            }
+            std::string model_id = req_body["model"];
 
             std::cout << "\n[API] Unloading previous model from memory..." << std::endl;
             active_model.reset();
             active_model_id.clear();
 
-            std::cout << "[API] Initializing model keyword: " << keyword << "..." << std::endl;
+            std::cout << "[API] Initializing model: " << model_id << "..." << std::endl;
 
-            if (keyword == "llama-3") {
-                active_model = std::make_unique<Llama3_8B>(flash_attention);
-                active_model_id = "llama-3";
-            } else if (keyword == "qwen-2.5") {
-                active_model = std::make_unique<Qwen2_5_32B>(flash_attention);
-                active_model_id = "qwen-2.5";
-            } else if (keyword == "qwen-3-coder") {
-                active_model = std::make_unique<Qwen3Coder_30B>(flash_attention);
-                active_model_id = "qwen-3-coder";
-            } else {
-                throw std::runtime_error("Unknown model keyword. Available: llama-3, qwen-2.5, qwen-3-coder");
-            }
+            active_model    = g_registry.load(model_id);
+            active_model_id = model_id;
 
             res.set_content(json({{"status", "success"},
-                                  {"message", keyword + " loaded into RAM"},
-                                  {"flash_attention", flash_attention}})
+                                  {"message", model_id + " loaded into RAM"}})
                                 .dump(),
                             "application/json");
         } catch (const std::exception& e) {
@@ -226,7 +209,7 @@ int main() {
                     inf_req.messages_payload = messages_payload;
                     inf_req.config = config;
                     inf_req.token_callback = token_cb;
-                    
+
                     std::promise<std::string> promise;
                     auto future = promise.get_future();
                     inf_req.promise = std::move(promise);
@@ -236,7 +219,6 @@ int main() {
                     try {
                         future.get();
                     } catch (...) {
-
                     }
 
                     constexpr const char k_done[] = "data: [DONE]\n\n";
@@ -294,30 +276,33 @@ int main() {
     });
 
     svr.Get("/v1/models", [&](const httplib::Request &req, httplib::Response &res) {
-        json models_list = {
-            {"object", "list"},
-            {"data",
-             json::array({
-                 {{"id", "llama-3"}, {"object", "model"}, {"created", 1715299200}, {"owned_by", "truss-native"}},
-                 {{"id", "qwen-2.5"}, {"object", "model"}, {"created", 1715299200}, {"owned_by", "truss-native"}},
-                 {{"id", "qwen-3-coder"}, {"object", "model"}, {"created", 1715299200}, {"owned_by", "truss-native"}},
-             })}};
-
+        json data = json::array();
+        for (const auto& spec : g_registry.all()) {
+            data.push_back({
+                {"id",       spec.id},
+                {"object",   "model"},
+                {"created",  1715299200},
+                {"owned_by", "truss-native"},
+                {"type",     spec.type}
+            });
+        }
+        json models_list = {{"object", "list"}, {"data", data}};
         res.set_content(models_list.dump(), "application/json");
     });
 
+    std::cout << "Truss Native Started!" << std::endl;
     std::cout << "Dynamic API Server running on port 8080" << std::endl;
     std::cout << "Waiting for an initialization request..." << std::endl;
     svr.listen("0.0.0.0", 8080);
-    
+
     server_running = false;
 
     InferenceRequest dummy_req;
     std::promise<std::string> dummy_promise;
     dummy_req.promise = std::move(dummy_promise);
     req_queue.push_request(std::move(dummy_req));
-    
+
     inference_worker.join();
-    
+
     return 0;
 }

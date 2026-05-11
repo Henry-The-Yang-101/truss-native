@@ -1,28 +1,43 @@
 cmake_minimum_required(VERSION 3.24)
-project(TrussLlamaServer CXX)
+project(TrussServer CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
-# Fetch llama.cpp directly from GitHub
 include(FetchContent)
+
 FetchContent_Declare(
     llama
     GIT_REPOSITORY https://github.com/ggerganov/llama.cpp
     GIT_TAG master
 )
 # Force Apple Silicon GPU acceleration
-set(GGML_METAL ON CACHE BOOL "Enable Metal" FORCE) 
+set(GGML_METAL ON CACHE BOOL "Enable Metal" FORCE)
 FetchContent_MakeAvailable(llama)
 
-add_executable(truss_server src/main.cpp src/llm_engine.cpp src/inference_queue.h)
+FetchContent_Declare(
+    pybind11
+    GIT_REPOSITORY https://github.com/pybind/pybind11
+    GIT_TAG v2.13.6
+)
+FetchContent_MakeAvailable(pybind11)
+
+add_executable(truss_server
+    src/main.cpp
+    src/llama_engine.cpp
+    src/mlx_engine.cpp
+    src/inference_queue.h
+)
+
 target_include_directories(truss_server PRIVATE src)
 
-target_link_libraries(truss_server PRIVATE 
+target_link_libraries(truss_server PRIVATE
     yaml-cpp
     nlohmann_json::nlohmann_json
     llama
+    pybind11::embed
 )

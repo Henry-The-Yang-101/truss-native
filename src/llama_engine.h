@@ -8,13 +8,13 @@ struct GenerationConfig {
     float temperature = 0.7f;
 };
 
-class LLMEngine {
+class LlamaEngine {
 public:
-    explicit LLMEngine(const std::string& model_path, bool flash_attention = true);
-    ~LLMEngine();
+    explicit LlamaEngine(const std::string& model_path, bool flash_attention = true);
+    ~LlamaEngine();
 
-    LLMEngine(const LLMEngine&) = delete;
-    LLMEngine& operator=(const LLMEngine&) = delete;
+    LlamaEngine(const LlamaEngine&) = delete;
+    LlamaEngine& operator=(const LlamaEngine&) = delete;
 
     std::string generate(const std::string& prompt, const GenerationConfig& config = GenerationConfig(),
                          std::function<bool(const std::string&)> token_callback = nullptr);

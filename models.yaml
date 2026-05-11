@@ -1,0 +1,41 @@
+# Model registry for truss-native
+#
+# Each entry defines one model that can be loaded via POST /v1/initialize.
+#
+# Fields:
+#   id            - nickname used in API calls (e.g. "llama-3")
+#   type          - engine backend: "llama" (GGUF via llama.cpp) or "mlx" (safetensors via mlx-lm)
+#   chat_format   - prompt template: "llama3" or "qwen"
+#   path          - path to the model file (GGUF) or model directory (MLX),
+#                   relative to the build/ directory where the server runs
+#   flash_attention - (llama only) whether to enable flash attention; defaults to true
+#
+# Directory layout:
+#   models/
+#   ├── llama/     <- GGUF model directories go here
+#   └── mlx/       <- MLX safetensors model directories go here
+
+models:
+  - id: llama-3
+    type: llama
+    chat_format: llama3
+    path: ../models/llama/llama3-8b-gguf/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf
+    flash_attention: true
+
+  - id: qwen-2.5
+    type: llama
+    chat_format: qwen
+    path: ../models/llama/qwen2.5-32b-gguf/qwen2.5-coder-32b-instruct-q4_k_m.gguf
+    flash_attention: true
+
+  - id: qwen-3-coder
+    type: llama
+    chat_format: qwen
+    path: ../models/llama/qwen3-coder-30b-a3b/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf
+    flash_attention: true
+
+  # MLX example — add your own mlx-community model directories here
+  # - id: llama-3-mlx
+  #   type: mlx
+  #   chat_format: llama3
+  #   path: ../models/mlx/Meta-Llama-3-8B-Instruct-4bit

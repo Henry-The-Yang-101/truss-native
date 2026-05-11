@@ -1,25 +1,25 @@
-#include "llm_engine.h"
+#include "llama_engine.h"
 #include "llama.h"
 #include <functional>
 #include <vector>
 #include <stdexcept>
 #include <iostream>
 
-struct LLMEngine::Impl {
+struct LlamaEngine::Impl {
     llama_model* model = nullptr;
     llama_context* ctx = nullptr;
     llama_sampler* smpl = nullptr;
 
-    int n_past = 0; 
-    const int MAX_CONTEXT = 4096; 
+    int n_past = 0;
+    const int MAX_CONTEXT = 4096;
 
     Impl(const std::string& model_path, bool flash_attention) {
         llama_backend_init();
 
         llama_model_params model_params = llama_model_default_params();
-        model_params.n_gpu_layers = 99; 
+        model_params.n_gpu_layers = 99;
 
-        std::cout << "[LLMEngine] Loading model into Metal unified memory..." << std::endl;
+        std::cout << "[LlamaEngine] Loading model into Metal unified memory..." << std::endl;
         model = llama_load_model_from_file(model_path.c_str(), model_params);
         if (!model) throw std::runtime_error("Failed to load model from " + model_path);
 
@@ -48,7 +48,7 @@ struct LLMEngine::Impl {
         n_past = 0;
 
         std::vector<llama_token> tokens(prompt.length() + 2);
-        
+
         int n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), false, true);
         if (n_tokens < 0) {
             tokens.resize(-n_tokens);
@@ -60,26 +60,25 @@ struct LLMEngine::Impl {
         llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
         smpl = llama_sampler_chain_init(sparams);
         llama_sampler_chain_add(smpl, llama_sampler_init_temp(config.temperature));
-        llama_sampler_chain_add(smpl, llama_sampler_init_greedy()); 
+        llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
 
         llama_batch batch = llama_batch_init(MAX_CONTEXT, 0, 1);
         batch.n_tokens = 0;
 
-        for (int i = 0; i < tokens.size(); i++) {
+        for (int i = 0; i < (int)tokens.size(); i++) {
             batch.token[batch.n_tokens] = tokens[i];
-            batch.pos[batch.n_tokens] = n_past + i; 
+            batch.pos[batch.n_tokens] = n_past + i;
             batch.n_seq_id[batch.n_tokens] = 1;
             batch.seq_id[batch.n_tokens][0] = 0;
-            batch.logits[batch.n_tokens] = (i == tokens.size() - 1); 
+            batch.logits[batch.n_tokens] = (i == (int)tokens.size() - 1);
             batch.n_tokens++;
         }
 
         if (llama_decode(ctx, batch) != 0) throw std::runtime_error("Failed to decode prompt");
 
-        std::string result = "";
-        int n_decode = 0; 
-        
-        int n_cur = n_past + tokens.size(); 
+        std::string result;
+        int n_decode = 0;
+        int n_cur = n_past + (int)tokens.size();
 
         while (n_decode < config.max_tokens && n_cur < MAX_CONTEXT) {
             llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
@@ -112,24 +111,24 @@ struct LLMEngine::Impl {
             n_cur++;
             n_decode++;
         }
-        n_past = n_cur; 
+        n_past = n_cur;
 
-        llama_batch_free(batch); 
+        llama_batch_free(batch);
         return result;
     }
 };
 
-LLMEngine::LLMEngine(const std::string& model_path, bool flash_attention)
+LlamaEngine::LlamaEngine(const std::string& model_path, bool flash_attention)
     : pimpl_(std::make_unique<Impl>(model_path, flash_attention)) {}
 
-LLMEngine::~LLMEngine() = default;
+LlamaEngine::~LlamaEngine() = default;
 
-std::string LLMEngine::generate(const std::string& prompt, const GenerationConfig& config,
-                                std::function<bool(const std::string&)> token_callback) {
+std::string LlamaEngine::generate(const std::string& prompt, const GenerationConfig& config,
+                                   std::function<bool(const std::string&)> token_callback) {
     try {
         return pimpl_->generate_text(prompt, config, token_callback);
     } catch (const std::exception& e) {
-        std::cerr << "[LLMEngine Error] " << e.what() << std::endl;
+        std::cerr << "[LlamaEngine Error] " << e.what() << std::endl;
         return "Error during generation: " + std::string(e.what());
     }
 }
