@@ -8,14 +8,6 @@
 
 namespace py = pybind11;
 
-// ---------------------------------------------------------------------------
-// Python interpreter lifetime
-//
-// Only one scoped_interpreter may be alive at a time per process. We keep a
-// reference-counted wrapper so that any number of MLXEngine instances can
-// share the same interpreter without tearing it down prematurely.
-// ---------------------------------------------------------------------------
-
 namespace {
 
     struct InterpreterGuard {
