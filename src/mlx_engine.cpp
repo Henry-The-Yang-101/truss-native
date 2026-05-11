@@ -18,28 +18,24 @@ namespace py = pybind11;
 
 namespace {
 
-struct InterpreterGuard {
-    py::scoped_interpreter interp;
-};
+    struct InterpreterGuard {
+        py::scoped_interpreter interp;
+    };
 
-static std::weak_ptr<InterpreterGuard> g_interp_weak;
-static std::mutex                       g_interp_mutex;
+    static std::weak_ptr<InterpreterGuard> g_interp_weak;
+    static std::mutex                       g_interp_mutex;
 
-std::shared_ptr<InterpreterGuard> acquire_interpreter() {
-    std::lock_guard<std::mutex> lock(g_interp_mutex);
-    auto ptr = g_interp_weak.lock();
-    if (!ptr) {
-        ptr = std::make_shared<InterpreterGuard>();
-        g_interp_weak = ptr;
+    std::shared_ptr<InterpreterGuard> acquire_interpreter() {
+        std::lock_guard<std::mutex> lock(g_interp_mutex);
+        auto ptr = g_interp_weak.lock();
+        if (!ptr) {
+            ptr = std::make_shared<InterpreterGuard>();
+            g_interp_weak = ptr;
+        }
+        return ptr;
     }
-    return ptr;
+
 }
-
-} // namespace
-
-// ---------------------------------------------------------------------------
-// Impl
-// ---------------------------------------------------------------------------
 
 struct MLXEngine::Impl {
     std::shared_ptr<InterpreterGuard> interp_guard;
@@ -74,7 +70,6 @@ struct MLXEngine::Impl {
             std::string result;
 
             if (token_callback) {
-                // stream_generate yields one decoded string segment at a time.
                 py::object generator = mlx_lm.attr("stream_generate")(
                     model,
                     tokenizer,
@@ -84,7 +79,6 @@ struct MLXEngine::Impl {
                 );
 
                 for (py::handle chunk : generator) {
-                    // Each yielded object is a GenerationResult; .text holds the new piece.
                     std::string piece = chunk.attr("text").cast<std::string>();
                     result += piece;
                     if (!piece.empty() && !token_callback(piece)) {
@@ -92,7 +86,6 @@ struct MLXEngine::Impl {
                     }
                 }
             } else {
-                // Non-streaming path: call generate() directly for a single string result.
                 py::object output = mlx_lm.attr("generate")(
                     model,
                     tokenizer,
@@ -110,10 +103,6 @@ struct MLXEngine::Impl {
         }
     }
 };
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 MLXEngine::MLXEngine(const std::string& model_dir)
     : pimpl_(std::make_unique<Impl>(model_dir)) {}
