@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 
+// Wrapper class that utilizes python mlx_lm library (no cpp API for MLX currently exists, this is the cleanest solution)
+
 namespace py = pybind11;
 
 namespace {
