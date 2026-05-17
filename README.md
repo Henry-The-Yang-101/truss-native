@@ -45,14 +45,14 @@ cd build
 ./truss_server
 ```
 
-In a different terminal, first initialize the model you want to use (using the ID you registered):
+In a different terminal, first initialize the model you want to use (using the ID you registered). You can optionally specify a `max_context` size (defaults to 4096 or the model's maximum trained context, whichever is smaller):
 ```bash
 curl -X POST http://localhost:8080/v1/initialize \
      -H "Content-Type: application/json" \
-     -d '{"model": "llama-3"}'
+     -d '{"model": "llama-3", "max_context": 4096}'
 ```
 
-Then, make a chat completion request:
+Then, make a chat completion request. The server manages your conversation history and will automatically summarize older messages if the context window exceeds 75% capacity:
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
      -H "Content-Type: application/json" \
@@ -62,5 +62,15 @@ curl -X POST http://localhost:8080/v1/chat/completions \
              {"role": "user", "content": "what is the meaning of life?"}
            ]
          }'
+```
+
+To check your current context usage against the maximum context size:
+```bash
+curl http://localhost:8080/v1/context_usage
+```
+
+To manually reset the server's conversation history and KV cache:
+```bash
+curl -X POST http://localhost:8080/v1/context_reset
 ```
 Instead of using curl, you could also use postman, where I have included a postman collection for you to import for your convenience.
