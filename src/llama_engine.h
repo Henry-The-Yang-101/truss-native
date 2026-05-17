@@ -10,7 +10,7 @@ struct GenerationConfig {
 
 class LlamaEngine {
 public:
-    explicit LlamaEngine(const std::string& model_path, bool flash_attention = true);
+    explicit LlamaEngine(const std::string& model_path, bool flash_attention = true, int max_context = 0);
     ~LlamaEngine();
 
     LlamaEngine(const LlamaEngine&) = delete;

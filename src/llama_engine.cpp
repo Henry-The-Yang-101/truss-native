@@ -11,18 +11,33 @@ struct LlamaEngine::Impl {
     llama_context* ctx = nullptr;
     llama_sampler* smpl = nullptr;
 
-    const int MAX_CONTEXT = 4096;
+    int MAX_CONTEXT;
     std::vector<llama_token> cached_tokens;
 
-    Impl(const std::string& model_path, bool flash_attention) {
+    Impl(const std::string& model_path, bool flash_attention, int requested_max_context) {
         llama_backend_init();
 
         llama_model_params model_params = llama_model_default_params();
         model_params.n_gpu_layers = 99;
 
         std::cout << "[LlamaEngine] Loading model into Metal unified memory..." << std::endl;
-        model = llama_load_model_from_file(model_path.c_str(), model_params);
+        model = llama_model_load_from_file(model_path.c_str(), model_params);
         if (!model) throw std::runtime_error("Failed to load model from " + model_path);
+
+        int n_ctx_train = llama_model_n_ctx_train(model);
+        if (requested_max_context > 0) {
+            if (requested_max_context > n_ctx_train) {
+                std::cout << "[LlamaEngine] Warning: requested max_context (" << requested_max_context 
+                          << ") exceeds model's training context length (" << n_ctx_train 
+                          << "). Capping to " << n_ctx_train << "." << std::endl;
+                MAX_CONTEXT = n_ctx_train;
+            } else {
+                MAX_CONTEXT = requested_max_context;
+            }
+        } else {
+            MAX_CONTEXT = 4096;
+            if (MAX_CONTEXT > n_ctx_train) MAX_CONTEXT = n_ctx_train;
+        }
 
         llama_context_params ctx_params = llama_context_default_params();
         ctx_params.flash_attn_type =
@@ -30,7 +45,7 @@ struct LlamaEngine::Impl {
         ctx_params.n_ctx = MAX_CONTEXT;
         ctx_params.n_batch = MAX_CONTEXT;
 
-        ctx = llama_new_context_with_model(model, ctx_params);
+        ctx = llama_init_from_model(model, ctx_params);
         if (!ctx) throw std::runtime_error("Failed to create context");
     }
 
@@ -149,8 +164,8 @@ struct LlamaEngine::Impl {
     }
 };
 
-LlamaEngine::LlamaEngine(const std::string& model_path, bool flash_attention)
-    : pimpl_(std::make_unique<Impl>(model_path, flash_attention)) {}
+LlamaEngine::LlamaEngine(const std::string& model_path, bool flash_attention, int max_context)
+    : pimpl_(std::make_unique<Impl>(model_path, flash_attention, max_context)) {}
 
 LlamaEngine::~LlamaEngine() = default;
 

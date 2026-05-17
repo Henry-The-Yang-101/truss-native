@@ -46,8 +46,8 @@ public:
 
 class LlamaLLM : public LargeLanguageModel {
 public:
-    explicit LlamaLLM(const ModelSpec& spec)
-        : engine_(spec.path, spec.flash_attention) {}
+    explicit LlamaLLM(const ModelSpec& spec, int max_context = 0)
+        : engine_(spec.path, spec.flash_attention, max_context) {}
 
     std::string format_messages(const nlohmann::json& messages) const override {
         std::string out = "<|begin_of_text|>";
@@ -88,7 +88,7 @@ private:
 
 class QwenLLM : public LlamaLLM {
 public:
-    explicit QwenLLM(const ModelSpec& spec) : LlamaLLM(spec) {}
+    explicit QwenLLM(const ModelSpec& spec, int max_context = 0) : LlamaLLM(spec, max_context) {}
 
     std::string format_messages(const nlohmann::json& messages) const override {
         std::string out;
@@ -108,8 +108,10 @@ public:
 
 class MLXLLM : public LargeLanguageModel {
 public:
-    explicit MLXLLM(const ModelSpec& spec)
-        : engine_(spec.path), chat_format_(spec.chat_format) {}
+    explicit MLXLLM(const ModelSpec& spec, int max_context = 0)
+        : engine_(spec.path), chat_format_(spec.chat_format) {
+        (void)max_context; // Ignored for MLX
+    }
 
     std::string format_messages(const nlohmann::json& messages) const override {
         if (chat_format_ == "qwen") {
@@ -170,7 +172,7 @@ public:
     }
 
     // Instantiate and return the model for the given id.
-    std::unique_ptr<LargeLanguageModel> load(const std::string& id) const {
+    std::unique_ptr<LargeLanguageModel> load(const std::string& id, int max_context = 0) const {
         const ModelSpec* spec = find(id);
         if (!spec) {
             throw std::runtime_error("Unknown model id '" + id + "'. Check models/models.yaml.");
@@ -178,13 +180,13 @@ public:
 
         if (spec->type == "llama") {
             if (spec->chat_format == "qwen") {
-                return std::make_unique<QwenLLM>(*spec);
+                return std::make_unique<QwenLLM>(*spec, max_context);
             }
-            return std::make_unique<LlamaLLM>(*spec);
+            return std::make_unique<LlamaLLM>(*spec, max_context);
         }
 
         if (spec->type == "mlx") {
-            return std::make_unique<MLXLLM>(*spec);
+            return std::make_unique<MLXLLM>(*spec, max_context);
         }
 
         throw std::runtime_error("Unknown model type '" + spec->type + "' for id '" + id + "'.");

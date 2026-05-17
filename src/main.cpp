@@ -171,6 +171,10 @@ int main() {
         try {
             auto req_body = json::parse(req.body);
             std::string model_id = req_body["model"];
+            int max_context = 0;
+            if (req_body.contains("max_context") && req_body["max_context"].is_number()) {
+                max_context = req_body["max_context"].get<int>();
+            }
 
             std::cout << "\n[API] Unloading previous model from memory..." << std::endl;
             active_model.reset();
@@ -184,7 +188,7 @@ int main() {
 
             std::cout << "[API] Initializing model: " << model_id << "..." << std::endl;
 
-            active_model    = g_registry.load(model_id);
+            active_model    = g_registry.load(model_id, max_context);
             active_model_id = model_id;
 
             res.set_content(json({{"status", "success"},
@@ -208,6 +212,36 @@ int main() {
             if (active_model) active_model->reset_cache();
         }
         res.set_content(json({{"status", "success"}, {"message", "Context cleared."}}).dump(), "application/json");
+    });
+
+    svr.Get("/v1/context_usage", [&](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> lock(init_mutex);
+        if (!active_model) {
+            res.status = 400;
+            res.set_content(
+                json({{"error", json{{"message", "No model loaded. Call /v1/initialize first."},
+                                  {"type", "invalid_request_error"},
+                                  {"param", nullptr},
+                                  {"code", "model_not_found"}}}})
+                    .dump(),
+                "application/json");
+            return;
+        }
+
+        int max_ctx = active_model->get_max_context();
+        int used_ctx = 0;
+
+        {
+            std::lock_guard<std::mutex> hlock(history_mutex);
+            std::string formatted = active_model->format_messages(json(global_chat_history));
+            used_ctx = active_model->count_tokens(formatted);
+        }
+
+        json res_body = {
+            {"used_context", used_ctx},
+            {"max_context", max_ctx}
+        };
+        res.set_content(res_body.dump(), "application/json");
     });
 
     svr.Post("/v1/chat/completions", [&](const httplib::Request &req, httplib::Response &res) {
