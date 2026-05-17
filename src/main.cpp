@@ -338,7 +338,18 @@ int main() {
             model_ptr = active_model.get();
         }
 
-        bool summarization_triggered = maybe_summarize(model_ptr);
+        bool summarization_triggered = false;
+        try {
+            summarization_triggered = maybe_summarize(model_ptr);
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_content(json({{"error", json{{"message", std::string("Summarization failed: ") + e.what()},
+                                              {"type", "internal_server_error"},
+                                              {"param", nullptr},
+                                              {"code", nullptr}}}})
+                            .dump(), "application/json");
+            return;
+        }
 
         json messages_for_generation;
         {

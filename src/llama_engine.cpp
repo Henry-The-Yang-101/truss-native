@@ -75,6 +75,10 @@ struct LlamaEngine::Impl {
 
         std::vector<llama_token> tokens = tokenize(prompt);
 
+        if (tokens.size() > (size_t)MAX_CONTEXT) {
+            throw std::runtime_error("Prompt exceeds maximum context length (" + std::to_string(tokens.size()) + " > " + std::to_string(MAX_CONTEXT) + ")");
+        }
+
         int common_prefix = 0;
         int max_common = (int)std::min(cached_tokens.size(), tokens.size());
         while (common_prefix < max_common && cached_tokens[common_prefix] == tokens[common_prefix]) {
@@ -94,7 +98,7 @@ struct LlamaEngine::Impl {
 
         int n_new = (int)tokens.size() - common_prefix;
         if (n_new > 0) {
-            llama_batch batch = llama_batch_init(MAX_CONTEXT, 0, 1);
+            llama_batch batch = llama_batch_init(n_new, 0, 1);
             batch.n_tokens = 0;
 
             for (int i = 0; i < n_new; i++) {

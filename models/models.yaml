@@ -39,3 +39,9 @@ models:
   #   type: mlx
   #   chat_format: llama3
   #   path: ../models/mlx/Meta-Llama-3-8B-Instruct-4bit
+
+  - id: llama-3-8b-instruct
+    type: llama
+    chat_format: llama3
+    path: ../models/llama/meta-llama-3-8b-instruct-gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf
+    flash_attention: true
