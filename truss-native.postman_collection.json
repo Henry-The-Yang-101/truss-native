@@ -20,7 +20,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"model\": \"qwen-2.5\"\n}",
+          "raw": "{\n  \"model\": \"qwen-2.5\",\n  \"max_context\": 4096\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -43,7 +43,7 @@
       "response": []
     },
     {
-      "name": "Prompt",
+      "name": "Chat Completions",
       "request": {
         "method": "POST",
         "header": [
@@ -55,7 +55,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n    \"prompt\": \"give me a python solution to number of islands, the leetcode question\"\n    // \"prompt\": \"now give me a solution in racket\"\n}",
+          "raw": "{\n  \"model\": \"qwen-2.5\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"give me a python solution to number of islands, the leetcode question\"}\n  ],\n  \"stream\": false\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -63,7 +63,7 @@
           }
         },
         "url": {
-          "raw": "http://localhost:8080/v1/predict",
+          "raw": "http://localhost:8080/v1/chat/completions",
           "protocol": "http",
           "host": [
             "localhost"
@@ -71,7 +71,48 @@
           "port": "8080",
           "path": [
             "v1",
-            "predict"
+            "chat",
+            "completions"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Context Usage",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/v1/context_usage",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "v1",
+            "context_usage"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Context Reset",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/v1/context_reset",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "v1",
+            "context_reset"
           ]
         }
       },
