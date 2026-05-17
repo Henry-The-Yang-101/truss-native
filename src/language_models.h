@@ -34,6 +34,10 @@ public:
     virtual std::string generate(const nlohmann::json& messages,
                                  const GenerationConfig& config = GenerationConfig(),
                                  std::function<bool(const std::string&)> token_callback = nullptr) = 0;
+
+    virtual int count_tokens(const std::string& text) const = 0;
+    virtual int get_max_context() const = 0;
+    virtual void reset_cache() = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -60,6 +64,18 @@ public:
                          const GenerationConfig& config = GenerationConfig(),
                          std::function<bool(const std::string&)> token_callback = nullptr) override {
         return engine_.generate(format_messages(messages), config, std::move(token_callback));
+    }
+
+    int count_tokens(const std::string& text) const override {
+        return engine_.count_tokens(text);
+    }
+
+    int get_max_context() const override {
+        return engine_.get_max_context();
+    }
+
+    void reset_cache() override {
+        engine_.reset_cache();
     }
 
 private:
@@ -122,6 +138,10 @@ public:
                          std::function<bool(const std::string&)> token_callback = nullptr) override {
         return engine_.generate(format_messages(messages), config, std::move(token_callback));
     }
+
+    int count_tokens(const std::string& /*text*/) const override { return 0; }
+    int get_max_context() const override { return 0; }
+    void reset_cache() override {}
 
 private:
     MLXEngine engine_;

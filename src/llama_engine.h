@@ -19,6 +19,10 @@ public:
     std::string generate(const std::string& prompt, const GenerationConfig& config = GenerationConfig(),
                          std::function<bool(const std::string&)> token_callback = nullptr);
 
+    int count_tokens(const std::string& text) const;
+    int get_max_context() const;
+    void reset_cache();
+
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_;

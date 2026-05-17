@@ -1,5 +1,6 @@
 #include "llama_engine.h"
 #include "llama.h"
+#include <algorithm>
 #include <functional>
 #include <vector>
 #include <stdexcept>
@@ -10,8 +11,8 @@ struct LlamaEngine::Impl {
     llama_context* ctx = nullptr;
     llama_sampler* smpl = nullptr;
 
-    int n_past = 0;
     const int MAX_CONTEXT = 4096;
+    std::vector<llama_token> cached_tokens;
 
     Impl(const std::string& model_path, bool flash_attention) {
         llama_backend_init();
@@ -40,21 +41,35 @@ struct LlamaEngine::Impl {
         llama_backend_free();
     }
 
+    std::vector<llama_token> tokenize(const std::string& text) {
+        const llama_vocab* vocab = llama_model_get_vocab(model);
+        std::vector<llama_token> tokens(text.length() + 2);
+        int n = llama_tokenize(vocab, text.c_str(), text.length(), tokens.data(), tokens.size(), false, true);
+        if (n < 0) {
+            tokens.resize(-n);
+            n = llama_tokenize(vocab, text.c_str(), text.length(), tokens.data(), tokens.size(), false, true);
+        }
+        if (n < 0) return {};
+        tokens.resize(n);
+        return tokens;
+    }
+
     std::string generate_text(const std::string& prompt, const GenerationConfig& config,
                               const std::function<bool(const std::string&)>& token_callback) {
         const llama_vocab* vocab = llama_model_get_vocab(model);
 
-        llama_memory_clear(llama_get_memory(ctx), true);
-        n_past = 0;
+        std::vector<llama_token> tokens = tokenize(prompt);
 
-        std::vector<llama_token> tokens(prompt.length() + 2);
-
-        int n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), false, true);
-        if (n_tokens < 0) {
-            tokens.resize(-n_tokens);
-            n_tokens = llama_tokenize(vocab, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), false, true);
+        int common_prefix = 0;
+        int max_common = (int)std::min(cached_tokens.size(), tokens.size());
+        while (common_prefix < max_common && cached_tokens[common_prefix] == tokens[common_prefix]) {
+            common_prefix++;
         }
-        tokens.resize(n_tokens);
+
+        if (common_prefix < (int)cached_tokens.size()) {
+            llama_memory_seq_rm(llama_get_memory(ctx), 0, common_prefix, -1);
+            cached_tokens.resize(common_prefix);
+        }
 
         if (smpl) llama_sampler_free(smpl);
         llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
@@ -62,23 +77,36 @@ struct LlamaEngine::Impl {
         llama_sampler_chain_add(smpl, llama_sampler_init_temp(config.temperature));
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
 
-        llama_batch batch = llama_batch_init(MAX_CONTEXT, 0, 1);
-        batch.n_tokens = 0;
+        int n_new = (int)tokens.size() - common_prefix;
+        if (n_new > 0) {
+            llama_batch batch = llama_batch_init(MAX_CONTEXT, 0, 1);
+            batch.n_tokens = 0;
 
-        for (int i = 0; i < (int)tokens.size(); i++) {
-            batch.token[batch.n_tokens] = tokens[i];
-            batch.pos[batch.n_tokens] = n_past + i;
-            batch.n_seq_id[batch.n_tokens] = 1;
-            batch.seq_id[batch.n_tokens][0] = 0;
-            batch.logits[batch.n_tokens] = (i == (int)tokens.size() - 1);
-            batch.n_tokens++;
+            for (int i = 0; i < n_new; i++) {
+                int pos = common_prefix + i;
+                batch.token[batch.n_tokens] = tokens[pos];
+                batch.pos[batch.n_tokens] = pos;
+                batch.n_seq_id[batch.n_tokens] = 1;
+                batch.seq_id[batch.n_tokens][0] = 0;
+                batch.logits[batch.n_tokens] = (i == n_new - 1);
+                batch.n_tokens++;
+            }
+
+            if (llama_decode(ctx, batch) != 0) {
+                llama_batch_free(batch);
+                throw std::runtime_error("Failed to decode prompt");
+            }
+            llama_batch_free(batch);
         }
 
-        if (llama_decode(ctx, batch) != 0) throw std::runtime_error("Failed to decode prompt");
+        cached_tokens = tokens;
 
         std::string result;
         int n_decode = 0;
-        int n_cur = n_past + (int)tokens.size();
+        int n_cur = (int)tokens.size();
+        std::vector<llama_token> generated_ids;
+
+        llama_batch single_batch = llama_batch_init(1, 0, 1);
 
         while (n_decode < config.max_tokens && n_cur < MAX_CONTEXT) {
             llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
@@ -98,22 +126,25 @@ struct LlamaEngine::Impl {
                 }
             }
 
-            batch.n_tokens = 0;
-            batch.token[batch.n_tokens] = new_token_id;
-            batch.pos[batch.n_tokens] = n_cur;
-            batch.n_seq_id[batch.n_tokens] = 1;
-            batch.seq_id[batch.n_tokens][0] = 0;
-            batch.logits[batch.n_tokens] = true;
-            batch.n_tokens++;
+            single_batch.n_tokens = 0;
+            single_batch.token[0] = new_token_id;
+            single_batch.pos[0] = n_cur;
+            single_batch.n_seq_id[0] = 1;
+            single_batch.seq_id[0][0] = 0;
+            single_batch.logits[0] = true;
+            single_batch.n_tokens = 1;
 
-            if (llama_decode(ctx, batch) != 0) break;
+            if (llama_decode(ctx, single_batch) != 0) break;
 
+            generated_ids.push_back(new_token_id);
             n_cur++;
             n_decode++;
         }
-        n_past = n_cur;
 
-        llama_batch_free(batch);
+        llama_batch_free(single_batch);
+
+        cached_tokens.insert(cached_tokens.end(), generated_ids.begin(), generated_ids.end());
+
         return result;
     }
 };
@@ -131,4 +162,24 @@ std::string LlamaEngine::generate(const std::string& prompt, const GenerationCon
         std::cerr << "[LlamaEngine Error] " << e.what() << std::endl;
         return "Error during generation: " + std::string(e.what());
     }
+}
+
+int LlamaEngine::count_tokens(const std::string& text) const {
+    const llama_vocab* vocab = llama_model_get_vocab(pimpl_->model);
+    std::vector<llama_token> tokens(text.length() + 2);
+    int n = llama_tokenize(vocab, text.c_str(), text.length(), tokens.data(), tokens.size(), false, true);
+    if (n < 0) {
+        tokens.resize(-n);
+        n = llama_tokenize(vocab, text.c_str(), text.length(), tokens.data(), tokens.size(), false, true);
+    }
+    return n < 0 ? 0 : n;
+}
+
+int LlamaEngine::get_max_context() const {
+    return pimpl_->MAX_CONTEXT;
+}
+
+void LlamaEngine::reset_cache() {
+    llama_memory_clear(llama_get_memory(pimpl_->ctx), true);
+    pimpl_->cached_tokens.clear();
 }
