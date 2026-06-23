@@ -129,7 +129,7 @@ static bool maybe_summarize(LargeLanguageModel* model) {
 
     json summarize_messages = json::array({
         json{{"role", "user"},
-             {"content", "Summarize the following conversation concisely, preserving all important facts, decisions, and context:\n\n" + conv_text}}
+             {"content", "Condense the following conversation into a 'caveman' style summary. Maximize context density. Omit all filler words, articles, and conversational pleasantries. Retain only critical facts, entities, decisions, and code snippets. Ensure zero loss of essential context while minimizing token count:\n\n" + conv_text}}
     });
 
     GenerationConfig sum_config;
