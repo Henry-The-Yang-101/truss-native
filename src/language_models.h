@@ -35,9 +35,9 @@ public:
 
     virtual std::string format_messages(const std::vector<ChatMessage>& messages) const = 0;
 
-    virtual std::string generate(const std::vector<ChatMessage>& messages,
-                                 const GenerationConfig& config = GenerationConfig(),
-                                 std::function<bool(const std::string&)> token_callback = nullptr) = 0;
+    virtual std::string generate_prompt(const std::string& prompt,
+                                        const GenerationConfig& config = GenerationConfig(),
+                                        std::function<bool(const std::string&)> token_callback = nullptr) = 0;
 
     virtual int count_tokens(const std::string& text) const = 0;
     virtual int get_max_context() const = 0;
@@ -67,10 +67,10 @@ public:
         return out;
     }
 
-    std::string generate(const std::vector<ChatMessage>& messages,
-                         const GenerationConfig& config = GenerationConfig(),
-                         std::function<bool(const std::string&)> token_callback = nullptr) override {
-        return engine_.generate(format_messages(messages), config, std::move(token_callback));
+    std::string generate_prompt(const std::string& prompt,
+                                const GenerationConfig& config = GenerationConfig(),
+                                std::function<bool(const std::string&)> token_callback = nullptr) override {
+        return engine_.generate(prompt, config, std::move(token_callback));
     }
 
     int count_tokens(const std::string& text) const override {
@@ -151,10 +151,10 @@ public:
         return out;
     }
 
-    std::string generate(const std::vector<ChatMessage>& messages,
-                         const GenerationConfig& config = GenerationConfig(),
-                         std::function<bool(const std::string&)> token_callback = nullptr) override {
-        return engine_.generate(format_messages(messages), config, std::move(token_callback));
+    std::string generate_prompt(const std::string& prompt,
+                                const GenerationConfig& config = GenerationConfig(),
+                                std::function<bool(const std::string&)> token_callback = nullptr) override {
+        return engine_.generate(prompt, config, std::move(token_callback));
     }
 
     int count_tokens(const std::string& /*text*/) const override { return 0; }

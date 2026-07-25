@@ -1,16 +1,15 @@
 #pragma once
 
-#include "language_models.h"
+#include "llama_engine.h"
 #include <string>
 #include <functional>
 #include <future>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
-#include <vector>
 
 struct InferenceRequest {
-    std::vector<ChatMessage> messages_payload;
+    std::string prompt;
     GenerationConfig config;
     std::function<bool(const std::string&)> token_callback;
     std::promise<std::string> promise;

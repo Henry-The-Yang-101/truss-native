@@ -60,10 +60,10 @@ static std::vector<ChatMessage> chat_messages_from_json(const json& messages) {
     return result;
 }
 
-static std::string run_inference(const std::vector<ChatMessage>& messages, const GenerationConfig& config,
+static std::string run_inference(std::string prompt, const GenerationConfig& config,
                                   std::function<bool(const std::string&)> token_cb = nullptr) {
     InferenceRequest req;
-    req.messages_payload = messages;
+    req.prompt = std::move(prompt);
     req.config = config;
     req.token_callback = std::move(token_cb);
     std::promise<std::string> promise;
@@ -98,7 +98,7 @@ void inference_worker_loop() {
                 continue;
             }
 
-            std::string result = current_model->generate(req.messages_payload, req.config, req.token_callback);
+            std::string result = current_model->generate_prompt(req.prompt, req.config, req.token_callback);
             req.promise.set_value(result);
         } catch (...) {
             try {
@@ -155,7 +155,7 @@ static bool maybe_summarize(LargeLanguageModel* model) {
     std::cout << "[Summarization] Condensing " << (last_summarizable - first_summarizable)
               << " messages..." << std::endl;
 
-    std::string summary = run_inference(summarize_messages, sum_config);
+    std::string summary = run_inference(model->format_messages(summarize_messages), sum_config);
 
     {
         std::lock_guard<std::mutex> hlock(history_mutex);
@@ -373,6 +373,23 @@ int main() {
             messages_for_generation = global_chat_history;
         }
 
+        std::string prompt_for_generation;
+        {
+            std::lock_guard<std::mutex> mlock(init_mutex);
+            if (!active_model) {
+                res.status = 400;
+                res.set_content(
+                    json({{"error", json{{"message", "No model loaded. Call /v1/initialize first."},
+                                          {"type", "invalid_request_error"},
+                                          {"param", nullptr},
+                                          {"code", "model_not_found"}}}})
+                        .dump(),
+                    "application/json");
+                return;
+            }
+            prompt_for_generation = active_model->format_messages(messages_for_generation);
+        }
+
         if (stream_requested) {
             std::random_device rd;
             std::mt19937_64 gen(rd());
@@ -381,7 +398,7 @@ int main() {
             res.set_chunked_content_provider(
                 "text/event-stream",
                 [completion_id = std::move(completion_id),
-                 messages_for_generation,
+                 prompt_for_generation = std::move(prompt_for_generation),
                  config,
                  summarization_triggered](size_t offset, httplib::DataSink &sink) mutable -> bool {
                     if (offset > 0) {
@@ -407,7 +424,7 @@ int main() {
                     };
 
                     try {
-                        run_inference(messages_for_generation, config, token_cb);
+                        run_inference(std::move(prompt_for_generation), config, token_cb);
                     } catch (...) {}
 
                     {
@@ -441,7 +458,7 @@ int main() {
 
         std::string output;
         try {
-            output = run_inference(messages_for_generation, config);
+            output = run_inference(std::move(prompt_for_generation), config);
         } catch (const std::exception& e) {
             res.status = 500;
             res.set_content(json({{"error", json{{"message", e.what()},
