@@ -135,7 +135,7 @@ void inference_worker_loop() {
     }
 }
 
-static bool maybe_summarize(LargeLanguageModel* model) {
+static bool maybe_summarize(LargeLanguageModel* model, std::string& formatted_history) {
     int max_ctx = model->get_max_context();
     if (max_ctx <= 0) return false;
 
@@ -148,7 +148,10 @@ static bool maybe_summarize(LargeLanguageModel* model) {
         std::string formatted = model->format_messages(global_chat_history);
         int token_count = model->count_tokens(formatted);
         float usage = static_cast<float>(token_count) / static_cast<float>(max_ctx);
-        if (usage < SUMMARIZE_THRESHOLD) return false;
+        if (usage < SUMMARIZE_THRESHOLD) {
+            formatted_history = std::move(formatted);
+            return false;
+        }
 
         first_summarizable = 0;
         if (!global_chat_history.empty() && global_chat_history[0].role == "system") {
@@ -382,8 +385,9 @@ int main() {
         }
 
         bool summarization_triggered = false;
+        std::string formatted_history;
         try {
-            summarization_triggered = maybe_summarize(model_ptr);
+            summarization_triggered = maybe_summarize(model_ptr, formatted_history);
         } catch (const std::exception& e) {
             res.status = 500;
             res.set_content(json({{"error", json{{"message", std::string("Summarization failed: ") + e.what()},
@@ -414,7 +418,9 @@ int main() {
                     "application/json");
                 return;
             }
-            prompt_for_generation = active_model->format_messages(messages_for_generation);
+            prompt_for_generation = formatted_history.empty()
+                                        ? active_model->format_messages(messages_for_generation)
+                                        : std::move(formatted_history);
         }
 
         if (stream_requested) {
