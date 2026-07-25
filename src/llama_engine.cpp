@@ -13,6 +13,9 @@ struct LlamaEngine::Impl {
 
     int MAX_CONTEXT;
     std::vector<llama_token> cached_tokens;
+    std::vector<llama_token> token_buffer;
+    std::vector<llama_token> generated_ids;
+    llama_batch single_token_batch{};
 
     Impl(const std::string& model_path, bool flash_attention, int requested_max_context) {
         llama_backend_init();
@@ -47,33 +50,42 @@ struct LlamaEngine::Impl {
 
         ctx = llama_init_from_model(model, ctx_params);
         if (!ctx) throw std::runtime_error("Failed to create context");
+
+        cached_tokens.reserve(MAX_CONTEXT);
+        token_buffer.reserve(MAX_CONTEXT);
+        generated_ids.reserve(MAX_CONTEXT);
+        single_token_batch = llama_batch_init(1, 0, 1);
     }
 
     ~Impl() {
+        llama_batch_free(single_token_batch);
         if (smpl) llama_sampler_free(smpl);
         if (ctx) llama_free(ctx);
         if (model) llama_free_model(model);
         llama_backend_free();
     }
 
-    std::vector<llama_token> tokenize(const std::string& text) {
+    void tokenize(const std::string& text, std::vector<llama_token>& tokens) {
         const llama_vocab* vocab = llama_model_get_vocab(model);
-        std::vector<llama_token> tokens(text.length() + 2);
+        tokens.resize(text.length() + 2);
         int n = llama_tokenize(vocab, text.c_str(), text.length(), tokens.data(), tokens.size(), false, true);
         if (n < 0) {
             tokens.resize(-n);
             n = llama_tokenize(vocab, text.c_str(), text.length(), tokens.data(), tokens.size(), false, true);
         }
-        if (n < 0) return {};
+        if (n < 0) {
+            tokens.clear();
+            return;
+        }
         tokens.resize(n);
-        return tokens;
     }
 
     std::string generate_text(const std::string& prompt, const GenerationConfig& config,
                               const std::function<bool(const std::string&)>& token_callback) {
         const llama_vocab* vocab = llama_model_get_vocab(model);
 
-        std::vector<llama_token> tokens = tokenize(prompt);
+        tokenize(prompt, token_buffer);
+        const std::vector<llama_token>& tokens = token_buffer;
 
         if (tokens.size() > (size_t)MAX_CONTEXT) {
             throw std::runtime_error("Prompt exceeds maximum context length (" + std::to_string(tokens.size()) + " > " + std::to_string(MAX_CONTEXT) + ")");
@@ -121,11 +133,10 @@ struct LlamaEngine::Impl {
         cached_tokens = tokens;
 
         std::string result;
+        result.reserve(static_cast<size_t>(std::min(config.max_tokens, MAX_CONTEXT - static_cast<int>(tokens.size()))) * 4);
         int n_decode = 0;
         int n_cur = (int)tokens.size();
-        std::vector<llama_token> generated_ids;
-
-        llama_batch single_batch = llama_batch_init(1, 0, 1);
+        generated_ids.clear();
 
         while (n_decode < config.max_tokens && n_cur < MAX_CONTEXT) {
             llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
@@ -145,22 +156,20 @@ struct LlamaEngine::Impl {
                 }
             }
 
-            single_batch.n_tokens = 0;
-            single_batch.token[0] = new_token_id;
-            single_batch.pos[0] = n_cur;
-            single_batch.n_seq_id[0] = 1;
-            single_batch.seq_id[0][0] = 0;
-            single_batch.logits[0] = true;
-            single_batch.n_tokens = 1;
+            single_token_batch.n_tokens = 0;
+            single_token_batch.token[0] = new_token_id;
+            single_token_batch.pos[0] = n_cur;
+            single_token_batch.n_seq_id[0] = 1;
+            single_token_batch.seq_id[0][0] = 0;
+            single_token_batch.logits[0] = true;
+            single_token_batch.n_tokens = 1;
 
-            if (llama_decode(ctx, single_batch) != 0) break;
+            if (llama_decode(ctx, single_token_batch) != 0) break;
 
             generated_ids.push_back(new_token_id);
             n_cur++;
             n_decode++;
         }
-
-        llama_batch_free(single_batch);
 
         cached_tokens.insert(cached_tokens.end(), generated_ids.begin(), generated_ids.end());
 
