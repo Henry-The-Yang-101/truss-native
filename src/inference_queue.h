@@ -1,16 +1,16 @@
 #pragma once
 
-#include "llama_engine.h"
-#include <nlohmann/json.hpp>
+#include "language_models.h"
 #include <string>
 #include <functional>
 #include <future>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <vector>
 
 struct InferenceRequest {
-    nlohmann::json messages_payload;
+    std::vector<ChatMessage> messages_payload;
     GenerationConfig config;
     std::function<bool(const std::string&)> token_callback;
     std::promise<std::string> promise;

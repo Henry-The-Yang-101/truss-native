@@ -24,7 +24,7 @@ std::mutex init_mutex;
 InferenceQueue req_queue;
 std::atomic<bool> server_running{true};
 
-std::vector<json> global_chat_history;
+std::vector<ChatMessage> global_chat_history;
 size_t last_client_message_count = 0;
 std::mutex history_mutex;
 
@@ -48,7 +48,19 @@ static bool validate_chat_messages(const json& messages) {
     return true;
 }
 
-static std::string run_inference(const json& messages, const GenerationConfig& config,
+static std::vector<ChatMessage> chat_messages_from_json(const json& messages) {
+    std::vector<ChatMessage> result;
+    result.reserve(messages.size());
+    for (const auto& message : messages) {
+        result.push_back({
+            message.at("role").get<std::string>(),
+            message.at("content").get<std::string>(),
+        });
+    }
+    return result;
+}
+
+static std::string run_inference(const std::vector<ChatMessage>& messages, const GenerationConfig& config,
                                   std::function<bool(const std::string&)> token_cb = nullptr) {
     InferenceRequest req;
     req.messages_payload = messages;
@@ -100,37 +112,36 @@ static bool maybe_summarize(LargeLanguageModel* model) {
     int max_ctx = model->get_max_context();
     if (max_ctx <= 0) return false;
 
-    json history_snapshot;
+    std::vector<ChatMessage> history_snapshot;
     int first_summarizable;
     int last_summarizable;
     {
         std::lock_guard<std::mutex> hlock(history_mutex);
 
-        std::string formatted = model->format_messages(json(global_chat_history));
+        std::string formatted = model->format_messages(global_chat_history);
         int token_count = model->count_tokens(formatted);
         float usage = static_cast<float>(token_count) / static_cast<float>(max_ctx);
         if (usage < SUMMARIZE_THRESHOLD) return false;
 
         first_summarizable = 0;
-        if (!global_chat_history.empty() && global_chat_history[0]["role"] == "system") {
+        if (!global_chat_history.empty() && global_chat_history[0].role == "system") {
             first_summarizable = 1;
         }
         last_summarizable = (int)global_chat_history.size() - RECENT_MESSAGES_TO_KEEP;
         if (last_summarizable <= first_summarizable) return false;
 
-        history_snapshot = json(global_chat_history);
+        history_snapshot = global_chat_history;
     }
 
     std::string conv_text;
     for (int i = first_summarizable; i < last_summarizable; i++) {
-        conv_text += history_snapshot[i]["role"].get<std::string>() + ": "
-                   + history_snapshot[i]["content"].get<std::string>() + "\n";
+        conv_text += history_snapshot[i].role + ": " + history_snapshot[i].content + "\n";
     }
 
-    json summarize_messages = json::array({
-        json{{"role", "user"},
-             {"content", "Condense the following conversation into a 'caveman' style summary. Maximize context density. Omit all filler words, articles, and conversational pleasantries. Retain only critical facts, entities, decisions, and code snippets. Ensure zero loss of essential context while minimizing token count:\n\n" + conv_text}}
-    });
+    std::vector<ChatMessage> summarize_messages{{
+        "user",
+        "Condense the following conversation into a 'caveman' style summary. Maximize context density. Omit all filler words, articles, and conversational pleasantries. Retain only critical facts, entities, decisions, and code snippets. Ensure zero loss of essential context while minimizing token count:\n\n" + conv_text,
+    }};
 
     GenerationConfig sum_config;
     sum_config.max_tokens = 512;
@@ -144,12 +155,11 @@ static bool maybe_summarize(LargeLanguageModel* model) {
     {
         std::lock_guard<std::mutex> hlock(history_mutex);
 
-        std::vector<json> new_history;
+        std::vector<ChatMessage> new_history;
         if (first_summarizable > 0) {
             new_history.push_back(global_chat_history[0]);
         }
-        new_history.push_back(json{{"role", "system"},
-                                   {"content", "Summary of previous conversation: " + summary}});
+        new_history.push_back({"system", "Summary of previous conversation: " + summary});
         for (int i = last_summarizable; i < (int)global_chat_history.size(); i++) {
             new_history.push_back(global_chat_history[i]);
         }
@@ -233,7 +243,7 @@ int main() {
 
         {
             std::lock_guard<std::mutex> hlock(history_mutex);
-            std::string formatted = active_model->format_messages(json(global_chat_history));
+            std::string formatted = active_model->format_messages(global_chat_history);
             used_ctx = active_model->count_tokens(formatted);
         }
 
@@ -313,7 +323,7 @@ int main() {
             return;
         }
 
-        json client_messages = req_body["messages"];
+        std::vector<ChatMessage> client_messages = chat_messages_from_json(req_body["messages"]);
 
         std::lock_guard<std::mutex> comp_lock(completion_mutex);
 
@@ -351,10 +361,10 @@ int main() {
             return;
         }
 
-        json messages_for_generation;
+        std::vector<ChatMessage> messages_for_generation;
         {
             std::lock_guard<std::mutex> hlock(history_mutex);
-            messages_for_generation = json(global_chat_history);
+            messages_for_generation = global_chat_history;
         }
 
         if (stream_requested) {
@@ -397,7 +407,7 @@ int main() {
                     {
                         std::lock_guard<std::mutex> hlock(history_mutex);
                         if (!assistant_response.empty()) {
-                            global_chat_history.push_back(json{{"role", "assistant"}, {"content", assistant_response}});
+                            global_chat_history.push_back({"assistant", assistant_response});
                             last_client_message_count = global_chat_history.size();
                         }
                     }
@@ -438,7 +448,7 @@ int main() {
 
         {
             std::lock_guard<std::mutex> hlock(history_mutex);
-            global_chat_history.push_back(json{{"role", "assistant"}, {"content", output}});
+            global_chat_history.push_back({"assistant", output});
             last_client_message_count = global_chat_history.size();
         }
 

@@ -1,13 +1,17 @@
 #pragma once
 #include "llama_engine.h"
 #include "mlx_engine.h"
-#include <nlohmann/json.hpp>
 #include <yaml-cpp/yaml.h>
 #include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+struct ChatMessage {
+    std::string role;
+    std::string content;
+};
 
 // ---------------------------------------------------------------------------
 // Model metadata loaded from models.yaml
@@ -29,9 +33,9 @@ class LargeLanguageModel {
 public:
     virtual ~LargeLanguageModel() = default;
 
-    virtual std::string format_messages(const nlohmann::json& messages) const = 0;
+    virtual std::string format_messages(const std::vector<ChatMessage>& messages) const = 0;
 
-    virtual std::string generate(const nlohmann::json& messages,
+    virtual std::string generate(const std::vector<ChatMessage>& messages,
                                  const GenerationConfig& config = GenerationConfig(),
                                  std::function<bool(const std::string&)> token_callback = nullptr) = 0;
 
@@ -49,18 +53,16 @@ public:
     explicit LlamaLLM(const ModelSpec& spec, int max_context = 0)
         : engine_(spec.path, spec.flash_attention, max_context) {}
 
-    std::string format_messages(const nlohmann::json& messages) const override {
+    std::string format_messages(const std::vector<ChatMessage>& messages) const override {
         std::string out = "<|begin_of_text|>";
         for (const auto& msg : messages) {
-            std::string role    = msg.at("role").get<std::string>();
-            std::string content = msg.at("content").get<std::string>();
-            out += "<|start_header_id|>" + role + "<|end_header_id|>\n\n" + content + "<|eot_id|>";
+            out += "<|start_header_id|>" + msg.role + "<|end_header_id|>\n\n" + msg.content + "<|eot_id|>";
         }
         out += "<|start_header_id|>assistant<|end_header_id|>\n\n";
         return out;
     }
 
-    std::string generate(const nlohmann::json& messages,
+    std::string generate(const std::vector<ChatMessage>& messages,
                          const GenerationConfig& config = GenerationConfig(),
                          std::function<bool(const std::string&)> token_callback = nullptr) override {
         return engine_.generate(format_messages(messages), config, std::move(token_callback));
@@ -90,12 +92,10 @@ class QwenLLM : public LlamaLLM {
 public:
     explicit QwenLLM(const ModelSpec& spec, int max_context = 0) : LlamaLLM(spec, max_context) {}
 
-    std::string format_messages(const nlohmann::json& messages) const override {
+    std::string format_messages(const std::vector<ChatMessage>& messages) const override {
         std::string out;
         for (const auto& msg : messages) {
-            std::string role    = msg.at("role").get<std::string>();
-            std::string content = msg.at("content").get<std::string>();
-            out += "<|im_start|>" + role + "\n" + content + "<|im_end|>\n";
+            out += "<|im_start|>" + msg.role + "\n" + msg.content + "<|im_end|>\n";
         }
         out += "<|im_start|>assistant\n";
         return out;
@@ -113,13 +113,11 @@ public:
         (void)max_context; // Ignored for MLX
     }
 
-    std::string format_messages(const nlohmann::json& messages) const override {
+    std::string format_messages(const std::vector<ChatMessage>& messages) const override {
         if (chat_format_ == "qwen") {
             std::string out;
             for (const auto& msg : messages) {
-                std::string role    = msg.at("role").get<std::string>();
-                std::string content = msg.at("content").get<std::string>();
-                out += "<|im_start|>" + role + "\n" + content + "<|im_end|>\n";
+                out += "<|im_start|>" + msg.role + "\n" + msg.content + "<|im_end|>\n";
             }
             out += "<|im_start|>assistant\n";
             return out;
@@ -127,15 +125,13 @@ public:
         // Default: llama3 format
         std::string out = "<|begin_of_text|>";
         for (const auto& msg : messages) {
-            std::string role    = msg.at("role").get<std::string>();
-            std::string content = msg.at("content").get<std::string>();
-            out += "<|start_header_id|>" + role + "<|end_header_id|>\n\n" + content + "<|eot_id|>";
+            out += "<|start_header_id|>" + msg.role + "<|end_header_id|>\n\n" + msg.content + "<|eot_id|>";
         }
         out += "<|start_header_id|>assistant<|end_header_id|>\n\n";
         return out;
     }
 
-    std::string generate(const nlohmann::json& messages,
+    std::string generate(const std::vector<ChatMessage>& messages,
                          const GenerationConfig& config = GenerationConfig(),
                          std::function<bool(const std::string&)> token_callback = nullptr) override {
         return engine_.generate(format_messages(messages), config, std::move(token_callback));
