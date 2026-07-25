@@ -12,6 +12,7 @@
 #include <thread>
 #include <atomic>
 #include <vector>
+#include <string_view>
 
 using json = nlohmann::json;
 
@@ -58,6 +59,32 @@ static std::vector<ChatMessage> chat_messages_from_json(const json& messages) {
         });
     }
     return result;
+}
+
+static void append_json_string(std::string& output, std::string_view value) {
+    static constexpr char hex[] = "0123456789abcdef";
+
+    output.push_back('"');
+    for (unsigned char c : value) {
+        switch (c) {
+            case '"': output += "\\\""; break;
+            case '\\': output += "\\\\"; break;
+            case '\b': output += "\\b"; break;
+            case '\f': output += "\\f"; break;
+            case '\n': output += "\\n"; break;
+            case '\r': output += "\\r"; break;
+            case '\t': output += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    output += "\\u00";
+                    output.push_back(hex[c >> 4]);
+                    output.push_back(hex[c & 0x0f]);
+                } else {
+                    output.push_back(static_cast<char>(c));
+                }
+        }
+    }
+    output.push_back('"');
 }
 
 static std::string run_inference(std::string prompt, const GenerationConfig& config,
@@ -394,10 +421,15 @@ int main() {
             std::random_device rd;
             std::mt19937_64 gen(rd());
             std::string completion_id = "chatcmpl-" + std::to_string(gen());
+            std::string stream_prefix = "data: {\"id\":";
+            stream_prefix.reserve(completion_id.size() + 96);
+            append_json_string(stream_prefix, completion_id);
+            stream_prefix += ",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":";
 
             res.set_chunked_content_provider(
                 "text/event-stream",
                 [completion_id = std::move(completion_id),
+                 stream_prefix = std::move(stream_prefix),
                  prompt_for_generation = std::move(prompt_for_generation),
                  config,
                  summarization_triggered](size_t offset, httplib::DataSink &sink) mutable -> bool {
@@ -407,17 +439,18 @@ int main() {
                     }
 
                     std::string assistant_response;
+                    if (config.max_tokens > 0) {
+                        assistant_response.reserve(static_cast<size_t>(config.max_tokens) * 4);
+                    }
+                    std::string stream_line;
+                    stream_line.reserve(stream_prefix.size() + 256);
 
-                    auto token_cb = [&completion_id, &sink, &assistant_response](const std::string &piece) -> bool {
+                    auto token_cb = [&sink, &assistant_response, &stream_prefix, &stream_line](const std::string &piece) -> bool {
                         assistant_response += piece;
-                        json choice = json::object({{"index", 0},
-                                                    {"delta", json::object({{"content", piece}})},
-                                                    {"finish_reason", nullptr}});
-                        json chunk = json::object({{"id", completion_id},
-                                                   {"object", "chat.completion.chunk"},
-                                                   {"choices", json::array({choice})}});
-                        std::string line = std::string("data: ") + chunk.dump() + "\n\n";
-                        if (!sink.write(line.data(), line.size())) {
+                        stream_line = stream_prefix;
+                        append_json_string(stream_line, piece);
+                        stream_line += "},\"finish_reason\":null}]}\n\n";
+                        if (!sink.write(stream_line.data(), stream_line.size())) {
                             return false;
                         }
                         return sink.is_writable();
