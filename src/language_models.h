@@ -55,6 +55,11 @@ public:
 
     std::string format_messages(const std::vector<ChatMessage>& messages) const override {
         std::string out = "<|begin_of_text|>";
+        size_t output_size = sizeof("<|begin_of_text|>") + sizeof("<|start_header_id|>assistant<|end_header_id|>\n\n") - 2;
+        for (const auto& msg : messages) {
+            output_size += sizeof("<|start_header_id|>") + sizeof("<|end_header_id|>\n\n") + sizeof("<|eot_id|>") - 3 + msg.role.size() + msg.content.size();
+        }
+        out.reserve(output_size);
         for (const auto& msg : messages) {
             out += "<|start_header_id|>" + msg.role + "<|end_header_id|>\n\n" + msg.content + "<|eot_id|>";
         }
@@ -94,6 +99,11 @@ public:
 
     std::string format_messages(const std::vector<ChatMessage>& messages) const override {
         std::string out;
+        size_t output_size = sizeof("<|im_start|>assistant\n") - 1;
+        for (const auto& msg : messages) {
+            output_size += sizeof("<|im_start|>") + sizeof("\n") + sizeof("<|im_end|>\n") - 3 + msg.role.size() + msg.content.size();
+        }
+        out.reserve(output_size);
         for (const auto& msg : messages) {
             out += "<|im_start|>" + msg.role + "\n" + msg.content + "<|im_end|>\n";
         }
@@ -116,6 +126,11 @@ public:
     std::string format_messages(const std::vector<ChatMessage>& messages) const override {
         if (chat_format_ == "qwen") {
             std::string out;
+            size_t output_size = sizeof("<|im_start|>assistant\n") - 1;
+            for (const auto& msg : messages) {
+                output_size += sizeof("<|im_start|>") + sizeof("\n") + sizeof("<|im_end|>\n") - 3 + msg.role.size() + msg.content.size();
+            }
+            out.reserve(output_size);
             for (const auto& msg : messages) {
                 out += "<|im_start|>" + msg.role + "\n" + msg.content + "<|im_end|>\n";
             }
@@ -124,6 +139,11 @@ public:
         }
         // Default: llama3 format
         std::string out = "<|begin_of_text|>";
+        size_t output_size = sizeof("<|begin_of_text|>") + sizeof("<|start_header_id|>assistant<|end_header_id|>\n\n") - 2;
+        for (const auto& msg : messages) {
+            output_size += sizeof("<|start_header_id|>") + sizeof("<|end_header_id|>\n\n") + sizeof("<|eot_id|>") - 3 + msg.role.size() + msg.content.size();
+        }
+        out.reserve(output_size);
         for (const auto& msg : messages) {
             out += "<|start_header_id|>" + msg.role + "<|end_header_id|>\n\n" + msg.content + "<|eot_id|>";
         }

@@ -133,7 +133,12 @@ static bool maybe_summarize(LargeLanguageModel* model) {
         history_snapshot = global_chat_history;
     }
 
+    size_t conv_text_size = 0;
+    for (int i = first_summarizable; i < last_summarizable; i++) {
+        conv_text_size += history_snapshot[i].role.size() + history_snapshot[i].content.size() + 3;
+    }
     std::string conv_text;
+    conv_text.reserve(conv_text_size);
     for (int i = first_summarizable; i < last_summarizable; i++) {
         conv_text += history_snapshot[i].role + ": " + history_snapshot[i].content + "\n";
     }
@@ -156,6 +161,7 @@ static bool maybe_summarize(LargeLanguageModel* model) {
         std::lock_guard<std::mutex> hlock(history_mutex);
 
         std::vector<ChatMessage> new_history;
+        new_history.reserve(global_chat_history.size() - (last_summarizable - first_summarizable) + 1);
         if (first_summarizable > 0) {
             new_history.push_back(global_chat_history[0]);
         }
