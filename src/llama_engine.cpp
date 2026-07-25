@@ -133,7 +133,8 @@ struct LlamaEngine::Impl {
         cached_tokens = tokens;
 
         std::string result;
-        result.reserve(static_cast<size_t>(std::min(config.max_tokens, MAX_CONTEXT - static_cast<int>(tokens.size()))) * 4);
+        int remaining_tokens = std::max(0, std::min(config.max_tokens, MAX_CONTEXT - static_cast<int>(tokens.size())));
+        result.reserve(static_cast<size_t>(remaining_tokens) * 4);
         int n_decode = 0;
         int n_cur = (int)tokens.size();
         generated_ids.clear();
